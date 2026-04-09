@@ -21,50 +21,64 @@ const PARTS = {'1':'נשם','2':'ברז חשמלי','3':'קפוצינטור','4'
 const FAULT_WORDS = ['תקלה','לא מושך','לא מקציף','לא עובד','לא נדלק','לא יוצא','לא פועל','להחליף','לא מחמם'];
 const STOP_WORDS = new Set(['לא','של','את','עם','על','אל','כן','בלי','רק','תקלה','מושך','מקציף','עובד','נדלק','יוצא','פועל','מחמם']);
 
+// רשימת ערים ישראליות
+const ISRAEL_CITIES = new Set([
+  'תל אביב','ירושלים','חיפה','ראשון לציון','פתח תקווה','אשדוד','נתניה','באר שבע',
+  'בני ברק','חולון','רמת גן','אשקלון','רחובות','בת ים','בית שמש','קריית גת',
+  'הרצליה','חדרה','מודיעין','לוד','רמלה','עכו','אילת','נצרת','עפולה',
+  'ראש העין','קריית אתא','קריית ביאליק','קריית מוצקין','קריית ים','קריית שמונה',
+  'הוד השרון','נס ציונה','טבריה','צפת','כפר סבא','רעננה','הרצליה','רמת השרון',
+  'גבעתיים','רמת גן','בני ברק','קריית אונו','גיבתיים','אור יהודה','קריית מלאכי',
+  'דימונה','ערד','מצפה רמון','נהריה','טירת כרמל','קריית חיים','קריית שמואל',
+  'יוקנעם','זכרון יעקב','קיסריה','עמק יזרעאל','עמק חפר','שרון','שפלה',
+  'אבן יהודה','כפר יונה','נתיבות','שדרות','אופקים','ירוחם','מגדל העמק',
+  'נשר','טמרה','שפרעם','סכנין','אום אל פחם','בית שאן','בית שמש',
+  'מעלה אדומים','ביתר עילית','אלעד','מודיעין עילית','ביתר','רכסים',
+  'פרדס חנה','בנימינה','זיכרון','גבעת שמואל','גני תקווה','אור עקיבא',
+  'חריש','נוף הגליל','מגדל העמק','קריית טבעון','טירה','קלנסווה',
+  'יבנה','גדרה','מזכרת בתיה','באר יעקב','נס ציונה','גן רוה',
+  'פתחיה','שוהם','ראש העין','כפר קאסם','טייבה','כפר יאסיף',
+  'בארי','שדות נגב','אשכול','מרחבים','בני שמעון'
+]);
+
+function extractCityFromMsg(msg) {
+  // חפש עיר של שתי מילים קודם
+  const twoCities = Array.from(ISRAEL_CITIES).filter(c => c.includes(' '));
+  for (const city of twoCities) {
+    if (msg.includes(city)) return city;
+  }
+  // עיר של מילה אחת
+  const oneCities = Array.from(ISRAEL_CITIES).filter(c => !c.includes(' '));
+  const words = msg.split(/\s+/);
+  for (const word of words) {
+    if (oneCities.includes(word)) return word;
+  }
+  return '';
+}
+
+
 const sessions = {};
 
 // ===== DB =====
-async function searchCustomers(query) {
-  // query = "שם_לקוח עיר" — מחפש לפי שם ומצמצם לפי עיר
-  const words = query.split(/\s+/).filter(w => w.length > 1 && !STOP_WORDS.has(w));
-  if (!words.length) return [];
+async function searchCustomers(clientName, cityName) {
+  if (!clientName || clientName.length < 2) return [];
 
-  // נסה את כל המילים יחד קודם
-  const fullStr = words.join(' ');
-  const {data: full} = await supabase.from('customers').select('*').ilike('site_name','%'+fullStr+'%').eq('is_active',true).limit(8);
-  if (full && full.length > 0) return full;
-
-  // חפש לפי כל מילה בנפרד ומצא תוצאות משותפות
-  const results = [];
-  for (const word of words) {
-    const {data} = await supabase.from('customers').select('*').ilike('site_name','%'+word+'%').eq('is_active',true).limit(20);
-    results.push(new Map((data||[]).map(c => [c.site_code, c])));
+  // חפש לפי שם לקוח
+  const {data} = await supabase.from('customers').select('*')
+    .ilike('site_name','%'+clientName+'%').eq('is_active',true).limit(20);
+  
+  if (!data || data.length === 0) return [];
+  
+  // סנן לפי עיר אם יש
+  if (cityName && cityName.length > 1) {
+    const filtered = data.filter(c => 
+      c.city?.includes(cityName) || 
+      c.site_name?.includes(cityName)
+    );
+    if (filtered.length > 0) return filtered.slice(0,8);
   }
-
-  // מצא לקוחות שמופיעים בכל החיפושים
-  if (results.length > 1) {
-    let intersection = results[0];
-    for (let i = 1; i < results.length; i++) {
-      for (const key of intersection.keys()) {
-        if (!results[i].has(key)) intersection.delete(key);
-      }
-    }
-    if (intersection.size > 0) return Array.from(intersection.values()).slice(0,8);
-  }
-
-  // אחרת — תוצאות של המילה הראשונה (שם הלקוח)
-  if (results[0]?.size > 0) {
-    // נסה לצמצם לפי מילה שנייה (עיר)
-    if (words.length > 1 && results[1]?.size > 0) {
-      const byCity = Array.from(results[0].values()).filter(c => 
-        words.slice(1).some(w => c.city?.includes(w) || c.site_name?.includes(w))
-      );
-      if (byCity.length > 0) return byCity.slice(0,8);
-    }
-    return Array.from(results[0].values()).slice(0,8);
-  }
-
-  return [];
+  
+  return data.slice(0,8);
 }
 
 async function getCustomerMachines(siteName) {
@@ -137,10 +151,19 @@ function fmtDate(iso) {
   return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-function extractClientName(msg) {
+function extractClientAndCity(msg) {
+  // הסר מילות תקלה
   let t = msg;
   FAULT_WORDS.forEach(w => { t = t.split(w).join(' '); });
-  return t.replace(/[^\u05d0-\u05eaA-Za-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
+  t = t.replace(/[^\u05d0-\u05eaA-Za-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
+  
+  const words = t.split(/\s+/).filter(w => w.length > 1 && !STOP_WORDS.has(w));
+  if (!words.length) return {clientName:'', cityName:''};
+  
+  // המילה הראשונה = שם לקוח, המילה השנייה = עיר
+  const clientName = words[0];
+  const cityName = words.length > 1 ? words[1] : '';
+  return {clientName, cityName};
 }
 
 // ===== MAIN HANDLER =====
@@ -199,14 +222,24 @@ async function handleMessage(from, body) {
       ).join('\n');
     }
 
-    // פתיחת תקלה
+    // פתיחת תקלה — פורמט: [שם לקוח] [עיר] תקלה [תיאור]
     const isFault = FAULT_WORDS.some(w => msg.includes(w));
     if (isFault) {
-      const clientName = extractClientName(msg);
+      // זהה עיר מרשימת הערים
+      const cityName = extractCityFromMsg(msg);
+      
+      // הסר עיר ומילות תקלה — מה שנשאר = שם לקוח
+      let clientText = msg;
+      if (cityName) clientText = clientText.split(cityName).join(' ');
+      FAULT_WORDS.forEach(w => { clientText = clientText.split(w).join(' '); });
+      ['לא','של','את','עם','על','בלי','רק'].forEach(w => { clientText = clientText.split(' '+w+' ').join(' '); });
+      clientText = clientText.replace(/[^\u05d0-\u05eaA-Za-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
+      const clientName = clientText;
+      
       if (clientName.length < 2) return 'מה שם הלקוח?';
-
-      const customers = await searchCustomers(clientName);
-      if (!customers.length) return `לא מצאתי לקוח בשם "${clientName}" — בדוק את השם ונסה שוב.`;
+      
+      let customers = await searchCustomers(clientName, cityName);
+      if (!customers.length) return `לא מצאתי לקוח בשם "${clientName}"${cityName?' ב'+cityName:''} — בדוק את השם ונסה שוב.`;
 
       s.faultDesc = msg;
 
