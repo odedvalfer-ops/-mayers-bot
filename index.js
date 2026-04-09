@@ -21,16 +21,15 @@ const FAULT_WORDS = ['תקלה','לא מושך','לא מקציף','לא עובד
 const sessions = {};
 
 async function searchCustomers(query) {
-  // חפש לפי כל מילה בנפרד ומזג תוצאות
-  // הסר מילות עזר ומילות תקלה מהחיפוש
-  const stopWords = ['לא','של','את','עם','על','אל','כי','כן','בלי','רק','תקלה','מושך','מקציף','עובד','נדלק','יוצא','פועל','החלף','מחמם'];
-  const words = query.split(/\s+/).filter(w => w.length > 1 && !stopWords.includes(w));
-  const results = new Map();
-  for (const word of words) {
-    const {data} = await supabase.from('customers').select('*').ilike('site_name',`%${word}%`).eq('is_active',true).limit(8);
-    (data||[]).forEach(c => results.set(c.site_code, c));
-  }
-  return Array.from(results.values()).slice(0, 8);
+  const stopWords = new Set(['לא','של','את','עם','על','אל','כי','כן','בלי','רק','תקלה','מושך','מקציף','עובד','נדלק','יוצא','פועל','החלף','מחמם','מגרס']);
+  const words = query.split(/\s+/).filter(w => w.length > 1 && !stopWords.has(w));
+  if (!words.length) return [];
+  const searchStr = words.join(' ');
+  const {data: full} = await supabase.from('customers').select('*').ilike('site_name','%'+searchStr+'%').eq('is_active',true).limit(8);
+  if (full && full.length > 0) return full;
+  const longest = [...words].sort((a,b) => b.length - a.length)[0];
+  const {data} = await supabase.from('customers').select('*').ilike('site_name','%'+longest+'%').eq('is_active',true).limit(8);
+  return data || [];
 }
 
 async function getHistory(siteCode, limit=2) {
@@ -66,7 +65,6 @@ function formatHistory(hist) {
 }
 
 function extractClient(msg) {
-  // הסר מילות תקלה והחזר את כל שאר הטקסט לחיפוש
   let t = msg;
   FAULT_WORDS.forEach(w => { t = t.split(w).join(' '); });
   return t.replace(/[^\u05d0-\u05eaA-Za-z0-9 ]/g, ' ').replace(/ +/g, ' ').trim();
@@ -111,10 +109,7 @@ async function handleMessage(from, body) {
   if(!sessions[phone]) sessions[phone]={step:'idle'};
   const session=sessions[phone];
 
-  // IDLE
   if(session.step==='idle') {
-
-    // סגירה
     if(msg.startsWith('סיימתי')) {
       const parts=msg.replace('סיימתי','').trim().split(/\s+/);
       const clientName=parts[0]||'';
@@ -134,7 +129,6 @@ async function handleMessage(from, body) {
       return 'איזו תקלה לסגור?\n'+matched.map((t,i)=>`${i+1}️⃣ ${t.customers?.site_name}${t.customers?.location?' | '+t.customers.location:''}`).join('\n');
     }
 
-    // פתיחה
     const isFault=FAULT_WORDS.some(w=>msg.includes(w));
     if(isFault) {
       const clientName=extractClient(msg);
@@ -225,7 +219,7 @@ async function handleMessage(from, body) {
       const hist3=await getHistory(siteCode,3);
       const recent=await countRecent(siteCode);
       const actText=session.actions.join(' + ');
-      const partsText=session.parts?.length?` | חלקים: ${session.parts.join(', ')}`:'';
+      const partsText=session.parts?.length?` | חלקים: ${session.parts.join(', ')}`:''
       const hist3Text=hist3.map(h=>`🔧 ${(h.closed_at||'?').slice(0,10)} — ${h.actions?h.actions.join(' + '):'לא מצוין'}`).join('\n');
       let alerts='';
       if(recent>=3) alerts+=`\n⚠️ ${recent} תקלות ב-60 יום`;
