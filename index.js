@@ -21,8 +21,14 @@ const FAULT_WORDS = ['תקלה','לא מושך','לא מקציף','לא עובד
 const sessions = {};
 
 async function searchCustomers(query) {
-  const {data} = await supabase.from('customers').select('*').ilike('site_name',`%${query}%`).eq('is_active',true).limit(8);
-  return data||[];
+  // חפש לפי כל מילה בנפרד ומזג תוצאות
+  const words = query.split(/\s+/).filter(w => w.length > 1);
+  const results = new Map();
+  for (const word of words) {
+    const {data} = await supabase.from('customers').select('*').ilike('site_name',`%${word}%`).eq('is_active',true).limit(8);
+    (data||[]).forEach(c => results.set(c.site_code, c));
+  }
+  return Array.from(results.values()).slice(0, 8);
 }
 
 async function getHistory(siteCode, limit=2) {
@@ -58,9 +64,10 @@ function formatHistory(hist) {
 }
 
 function extractClient(msg) {
-  let t=msg;
-  FAULT_WORDS.forEach(w=>{t=t.replace(w,'');});
-  return t.replace(/[^\u05d0-\u05eaA-Za-z0-9\s]/g,'').trim();
+  // הסר מילות תקלה והחזר את כל שאר הטקסט לחיפוש
+  let t = msg;
+  FAULT_WORDS.forEach(w => { t = t.split(w).join(' '); });
+  return t.replace(/[^\u05d0-\u05eaA-Za-z0-9 ]/g, ' ').replace(/ +/g, ' ').trim();
 }
 
 async function handleSingleCustomer(session, customer, phone) {
