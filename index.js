@@ -25,16 +25,46 @@ const sessions = {};
 
 // ===== DB =====
 async function searchCustomers(query) {
+  // query = "שם_לקוח עיר" — מחפש לפי שם ומצמצם לפי עיר
   const words = query.split(/\s+/).filter(w => w.length > 1 && !STOP_WORDS.has(w));
   if (!words.length) return [];
-  // נסה חיפוש מלא קודם
+
+  // נסה את כל המילים יחד קודם
   const fullStr = words.join(' ');
   const {data: full} = await supabase.from('customers').select('*').ilike('site_name','%'+fullStr+'%').eq('is_active',true).limit(8);
   if (full && full.length > 0) return full;
-  // חפש לפי המילה הארוכה ביותר
-  const longest = [...words].sort((a,b)=>b.length-a.length)[0];
-  const {data} = await supabase.from('customers').select('*').ilike('site_name','%'+longest+'%').eq('is_active',true).limit(8);
-  return data || [];
+
+  // חפש לפי כל מילה בנפרד ומצא תוצאות משותפות
+  const results = [];
+  for (const word of words) {
+    const {data} = await supabase.from('customers').select('*').ilike('site_name','%'+word+'%').eq('is_active',true).limit(20);
+    results.push(new Map((data||[]).map(c => [c.site_code, c])));
+  }
+
+  // מצא לקוחות שמופיעים בכל החיפושים
+  if (results.length > 1) {
+    let intersection = results[0];
+    for (let i = 1; i < results.length; i++) {
+      for (const key of intersection.keys()) {
+        if (!results[i].has(key)) intersection.delete(key);
+      }
+    }
+    if (intersection.size > 0) return Array.from(intersection.values()).slice(0,8);
+  }
+
+  // אחרת — תוצאות של המילה הראשונה (שם הלקוח)
+  if (results[0]?.size > 0) {
+    // נסה לצמצם לפי מילה שנייה (עיר)
+    if (words.length > 1 && results[1]?.size > 0) {
+      const byCity = Array.from(results[0].values()).filter(c => 
+        words.slice(1).some(w => c.city?.includes(w) || c.site_name?.includes(w))
+      );
+      if (byCity.length > 0) return byCity.slice(0,8);
+    }
+    return Array.from(results[0].values()).slice(0,8);
+  }
+
+  return [];
 }
 
 async function getCustomerMachines(siteName) {
