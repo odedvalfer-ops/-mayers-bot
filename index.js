@@ -22,7 +22,9 @@ const sessions = {};
 
 async function searchCustomers(query) {
   // חפש לפי כל מילה בנפרד ומזג תוצאות
-  const words = query.split(/\s+/).filter(w => w.length > 1);
+  // הסר מילות עזר ומילות תקלה מהחיפוש
+  const stopWords = ['לא','של','את','עם','על','אל','כי','כן','בלי','רק','תקלה','מושך','מקציף','עובד','נדלק','יוצא','פועל','החלף','מחמם'];
+  const words = query.split(/\s+/).filter(w => w.length > 1 && !stopWords.includes(w));
   const results = new Map();
   for (const word of words) {
     const {data} = await supabase.from('customers').select('*').ilike('site_name',`%${word}%`).eq('is_active',true).limit(8);
