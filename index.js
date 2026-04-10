@@ -617,63 +617,43 @@ async function doCloseTicket(s) {
 // ===== קריאת תמונה עם Claude API =====
 async function readDeliveryNote(imageUrl) {
   // הורד את התמונה
-  const imageData = await new Promise((resolve, reject) => {
-    https.get(imageUrl, (res) => {
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
-      res.on('error', reject);
-    });
-  });
+  const imgResponse = await fetch(imageUrl);
+  const imgBuffer = await imgResponse.arrayBuffer();
+  const imageData = Buffer.from(imgBuffer).toString('base64');
+  const mediaType = imgResponse.headers.get('content-type') || 'image/jpeg';
 
   // שלח ל-Claude API
-  const payload = JSON.stringify({
-    model: 'claude-opus-4-6',
-    max_tokens: 1000,
-    messages: [{
-      role: 'user',
-      content: [
-        {
-          type: 'image',
-          source: { type: 'base64', media_type: 'image/jpeg', data: imageData }
-        },
-        {
-          type: 'text',
-          text: 'זוהי תעודת משלוח של מכונת קפה. חלץ את הפרטים הבאים בפורמט JSON בלבד (ללא טקסט נוסף): { "client_name": "שם הלקוח", "address": "כתובת מלאה", "city": "עיר", "machine_type": "סוג מכונה", "contact_name": "איש קשר", "contact_phone": "טלפון", "delivery_note_number": "מספר תעודה", "driver": "שם הנהג" }'
-        }
-      ]
-    }]
+  const apiKey = (process.env.ANTHROPIC_KEY || '').trim();
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: mediaType, data: imageData }
+          },
+          {
+            type: 'text',
+            text: 'זוהי תעודת משלוח של מכונת קפה. חלץ את הפרטים הבאים בפורמט JSON בלבד ללא שום טקסט נוסף: { "client_name": "שם הלקוח", "address": "כתובת מלאה", "city": "עיר", "machine_type": "סוג מכונה", "contact_name": "איש קשר", "contact_phone": "טלפון", "delivery_note_number": "מספר תעודה", "driver": "שם הנהג" }'
+          }
+        ]
+      }]
+    })
   });
 
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(payload)
-      }
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const response = JSON.parse(data);
-          const text = response.content[0].text;
-          const json = JSON.parse(text.replace(/```json|```/g, '').trim());
-          resolve(json);
-        } catch(e) {
-          reject(e);
-        }
-      });
-    });
-    req.on('error', reject);
-    req.write(payload);
-    req.end();
-  });
+  const data = await response.json();
+  if (!data.content || !data.content[0]) throw new Error('No response from Claude');
+  const text = data.content[0].text;
+  return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
 // ===== סיכום יומי אלכס ב-18:00 =====
