@@ -257,6 +257,13 @@ async function handleMessage(from, body) {
         customers.map((c,i) => `${i+1}️⃣ ${c.site_name} — ${c.city}${c.location?' | '+c.location:''}`).join('\n');
     }
 
+
+  // ===== מעבדה — אלכס =====
+  if (msg === 'מתחיל עבודה' || msg.startsWith('מתחיל עבודה')) {
+    s.step = 'lab_select_machine';
+    return 'איזו מכונה?\n1️⃣ M12\n2️⃣ F16\n3️⃣ F15';
+  }
+
     // סיכום יומי
     if (msg === 'סיכום יומי') {
       const techs = await getTechnicians();
@@ -383,6 +390,79 @@ async function handleMessage(from, body) {
     return MORE_MENU;
   }
 
+
+  // ===== מעבדה — בחירת מכונה =====
+  if (s.step === 'lab_select_machine') {
+    const machines = {'1':'M12','2':'F16','3':'F15'};
+    if (machines[msg]) {
+      s.labMachine = machines[msg];
+      s.labStart = new Date().toISOString();
+      s.step = 'lab_working';
+      const timeStr = new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+      // שמור ב-DB
+      supabase.from('lab_jobs').insert({
+        machine_type: s.labMachine,
+        started_at: s.labStart,
+        technician_id: null
+      }).then(() => {});
+      return `🔧 כרטיס עבודה נפתח\n⏰ התחלה: ${timeStr}\nמכונה: ${s.labMachine}\n\nכשתסיים — כתוב: סיימתי`;
+    }
+    return 'בחר מספר מהרשימה';
+  }
+
+  // ===== מעבדה — סגירה =====
+  if (s.step === 'lab_working') {
+    if (msg === 'סיימתי') {
+      s.step = 'lab_action';
+      s.actions = [];
+      s.parts = [];
+      return ACTION_MENU;
+    }
+    return `אתה עובד על ${s.labMachine}\nכשתסיים — כתוב: סיימתי`;
+  }
+
+  // ===== מעבדה — פעולה =====
+  if (s.step === 'lab_action') {
+    if (ACTIONS[msg]) {
+      if (msg === '4') { s.step = 'lab_part'; return PART_MENU; }
+      s.actions = [ACTIONS[msg]];
+      s.step = 'lab_more';
+      return MORE_MENU;
+    }
+    return ACTION_MENU;
+  }
+
+  // ===== מעבדה — חלק =====
+  if (s.step === 'lab_part') {
+    if (PARTS[msg]) {
+      s.actions.push('החלפת חלק');
+      s.parts.push(PARTS[msg]);
+      s.step = 'lab_more';
+      return MORE_MENU;
+    }
+    return PART_MENU;
+  }
+
+  // ===== מעבדה — עוד פעולה =====
+  if (s.step === 'lab_more') {
+    if (msg === '6') {
+      // סגור עבודת מעבדה
+      const endTime = new Date().toISOString();
+      const actText = s.actions.join(' + ');
+      const partsText = s.parts?.length ? ` | חלקים: ${s.parts.join(', ')}` : '';
+      await supabase.from('lab_jobs').update({
+        completed_at: endTime,
+        actions: s.actions,
+        parts: s.parts
+      }).eq('machine_type', s.labMachine).is('completed_at', null);
+      s.step = 'idle';
+      return `✅ עבודת מעבדה הושלמה\n🔧 ${s.labMachine} | ${actText}${partsText}`;
+    }
+    if (msg === '4') { s.step = 'lab_part'; return PART_MENU; }
+    if (ACTIONS[msg] && !s.actions.includes(ACTIONS[msg])) s.actions.push(ACTIONS[msg]);
+    return MORE_MENU;
+  }
+
   // ===== אישור סיכום יומי =====
   if (s.step === 'daily_summary_confirm') {
     if (msg === '1') {
@@ -498,6 +578,40 @@ async function doCloseTicket(s) {
 }
 
 // ===== WEBHOOK =====
+// ===== סיכום יומי אלכס ב-18:00 =====
+async function sendDailySummaryAlex() {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const {data: jobs} = await supabase.from('lab_jobs')
+    .select('*')
+    .gte('started_at', today.toISOString())
+    .not('completed_at', 'is', null)
+    .order('started_at');
+  
+  if (!jobs || !jobs.length) return;
+  
+  let summary = `📋 סיכום מעבדה — ${today.toLocaleDateString('he-IL')}\n\n`;
+  summary += '| מכונה | פעולה | חלקים |\n';
+  summary += '|-------|--------|--------|\n';
+  jobs.forEach(j => {
+    const act = j.actions ? j.actions.join(' + ') : '—';
+    const parts = j.parts?.length ? j.parts.join(', ') : '—';
+    summary += `| ${j.machine_type} | ${act} | ${parts} |\n`;
+  });
+  summary += `\nסה"כ: ${jobs.length} מכונות תוקנו`;
+  
+  console.log('סיכום יומי אלכס:', summary);
+  // כשיהיה מספר אמיתי — לשלוח לאורי
+}
+
+// הרץ כל דקה ובדוק אם 18:00
+setInterval(() => {
+  const now = new Date();
+  if (now.getHours() === 18 && now.getMinutes() === 0) {
+    sendDailySummaryAlex();
+  }
+}, 60000);
+
 app.post('/webhook', async (req, res) => {
   try {
     const from = req.body.From;
