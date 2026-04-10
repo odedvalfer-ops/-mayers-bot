@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const twilio = require('twilio');
 const { createClient } = require('@supabase/supabase-js');
+const https = require('https');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -292,6 +293,40 @@ async function handleMessage(from, body) {
     return null;
   }
 
+  // ===== שיוך טכנאי להתקנה =====
+  if (s.step === 'installation_assign') {
+    const idx = parseInt(msg) - 1;
+    if (idx >= 0 && idx < (s.techs||[]).length) {
+      const tech = s.techs[idx];
+      const note = s.pendingNote;
+
+      // שמור התקנה במסד
+      const {data: inst} = await supabase.from('installations').insert({
+        site_code: null,
+        delivery_note_number: note.delivery_note_number,
+        machine_type: note.machine_type,
+        location: note.address,
+        technician_id: tech.id,
+        notes: JSON.stringify(note)
+      }).select().single();
+
+      s.installationId = inst?.id;
+      s.step = 'idle';
+
+      // הודעה לטכנאי
+      const techMsg = `📦 משימת התקנה חדשה!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address}\n🔧 ${note.machine_type}\n👤 ${note.contact_name} — ${note.contact_phone}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: הותקן`;
+
+      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
+    }
+    return 'בחר מספר מהרשימה';
+  }
+
+  // ===== סגירת התקנה =====
+  if (msg === 'הותקן') {
+    s.step = 'installation_confirm';
+    return 'שלח צילום של התעודה החתומה 📸';
+  }
+
   // ===== בחירת לקוח =====
   if (s.step === 'select_customer') {
     const idx = parseInt(msg) - 1;
@@ -578,6 +613,69 @@ async function doCloseTicket(s) {
 }
 
 // ===== WEBHOOK =====
+
+// ===== קריאת תמונה עם Claude API =====
+async function readDeliveryNote(imageUrl) {
+  // הורד את התמונה
+  const imageData = await new Promise((resolve, reject) => {
+    https.get(imageUrl, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+      res.on('error', reject);
+    });
+  });
+
+  // שלח ל-Claude API
+  const payload = JSON.stringify({
+    model: 'claude-opus-4-6',
+    max_tokens: 1000,
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: imageData }
+        },
+        {
+          type: 'text',
+          text: 'זוהי תעודת משלוח של מכונת קפה. חלץ את הפרטים הבאים בפורמט JSON בלבד (ללא טקסט נוסף): { "client_name": "שם הלקוח", "address": "כתובת מלאה", "city": "עיר", "machine_type": "סוג מכונה", "contact_name": "איש קשר", "contact_phone": "טלפון", "delivery_note_number": "מספר תעודה", "driver": "שם הנהג" }'
+        }
+      ]
+    }]
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const response = JSON.parse(data);
+          const text = response.content[0].text;
+          const json = JSON.parse(text.replace(/```json|```/g, '').trim());
+          resolve(json);
+        } catch(e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 // ===== סיכום יומי אלכס ב-18:00 =====
 async function sendDailySummaryAlex() {
   const today = new Date();
@@ -615,8 +713,69 @@ setInterval(() => {
 app.post('/webhook', async (req, res) => {
   try {
     const from = req.body.From;
-    const body = req.body.Body;
-    console.log(`📨 ${from}: ${body}`);
+    const body = req.body.Body || '';
+    const mediaUrl = req.body.MediaUrl0;
+    const mediaType = req.body.MediaContentType0;
+    console.log(`📨 ${from}: ${body}${mediaUrl?' [תמונה]':''}`);
+
+    // טיפול בתמונה — תעודת התקנה
+    if (mediaUrl && mediaType && mediaType.startsWith('image/')) {
+      const phone = from.replace('whatsapp:','');
+      if (!sessions[phone]) sessions[phone] = {step:'idle'};
+      const s = sessions[phone];
+
+      // אם בשלב installation_confirm — זו תעודה עם חתימה (סגירה)
+      if (s.step === 'installation_confirm') {
+        await supabase.from('installations').update({
+          signed_note_url: mediaUrl,
+          completed_at: new Date().toISOString()
+        }).eq('id', s.installationId);
+
+        // עדכן לקוח חדש במסד
+        if (s.pendingCustomer) {
+          await supabase.from('customers').insert({
+            site_code: 'NEW-' + Date.now(),
+            site_name: s.pendingCustomer.client_name,
+            city: s.pendingCustomer.city,
+            address: s.pendingCustomer.address,
+            contact_name: s.pendingCustomer.contact_name,
+            contact_phone: s.pendingCustomer.contact_phone,
+            machine_type: s.pendingCustomer.machine_type,
+            is_active: true
+          }).select().single();
+        }
+
+        s.step = 'idle';
+        const twiml = new twilio.twiml.MessagingResponse();
+        twiml.message(`✅ התקנה הושלמה ונרשמה!\n📍 ${s.pendingCustomer?.client_name || ''}\n🔧 ${s.pendingCustomer?.machine_type || ''}`);
+        res.type('text/xml');
+        return res.send(twiml.toString());
+      }
+
+      // אחרת — תעודה חדשה מגבי
+      try {
+        const noteData = await readDeliveryNote(mediaUrl);
+        sessions[phone].pendingNote = noteData;
+        sessions[phone].step = 'installation_assign';
+
+        const techs = await getTechnicians();
+        sessions[phone].techs = techs;
+
+        const card = `📦 התקנה חדשה זוהתה!\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+
+        const twiml = new twilio.twiml.MessagingResponse();
+        twiml.message(card);
+        res.type('text/xml');
+        return res.send(twiml.toString());
+      } catch(e) {
+        console.error('שגיאה בקריאת תעודה:', e);
+        const twiml = new twilio.twiml.MessagingResponse();
+        twiml.message('לא הצלחתי לקרוא את התעודה — נסה שוב או שלח ידנית.');
+        res.type('text/xml');
+        return res.send(twiml.toString());
+      }
+    }
+
     const reply = await handleMessage(from, body);
     if (reply) {
       const twiml = new twilio.twiml.MessagingResponse();
