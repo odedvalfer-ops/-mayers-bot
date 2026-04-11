@@ -10,7 +10,7 @@ app.use(express.json());
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const twilioClient = twilio(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
-const TWILIO_NUMBER = 'whatsapp:+14155238886';
+const TWILIO_NUMBER = 'whatsapp:+972584820015';
 
 // ===== תפריטים =====
 const ACTION_MENU = 'מה עשית?\n1️⃣ טיפול אבנית\n2️⃣ ניקיון מערכת הקצפה\n3️⃣ טיפול כדורית — יחידת חליטה\n4️⃣ החלפת חלק\n5️⃣ החלפת מכונה';
