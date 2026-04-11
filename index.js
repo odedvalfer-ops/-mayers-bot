@@ -794,8 +794,8 @@ async function readDeliveryNote(imageUrl) {
             text: `This is a delivery note from Mayer's Coffee. Extract the following fields as JSON only, no extra text.
 
 Instructions:
-- note_type: "התקנה" if this is a new installation, "איסוף" if this is a collection/return (look for the words "סיום התקשרות" or "איסוף" in the document)
-- client_name: the customer name from the "לכבוד" (To) field at the top right - write exactly as appears, no spaces between letters
+- note_type: "איסוף" if the items table contains "סיום התקשרות" or "איסוף מכונה" in the product name (שם פריט), otherwise "התקנה" 
+- client_name: the customer name from the "לכבוד" (To) field at the top right - write exactly as appears INCLUDING spaces between words
 - address: the street address below the customer name
 - city: the city below the address
 - machine_type: machine model like M12, F16, F15 from the items table
