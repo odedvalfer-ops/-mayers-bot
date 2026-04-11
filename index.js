@@ -717,7 +717,7 @@ async function buildShiuach(s, machine, phone, groupUpdate='') {
   const techs = await getTechnicians();
 
   // פתח תקלה
-  const ticket = await openTicket(machine.site_code, machine.location, s.faultDesc, phone);
+  const ticket = await openTicket(machine.site_code, machine.location, s.faultDesc, s.userName || phone);
   s.ticket = ticket;
   s.techs = techs;
   s.suggestedTech = prevTech || techs[0]?.name;
