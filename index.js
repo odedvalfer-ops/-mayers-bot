@@ -211,6 +211,7 @@ async function handleMessage(from, body) {
   const msg = body.trim();
   if (!sessions[phone]) sessions[phone] = {step:'idle'};
   const s = sessions[phone];
+  s._phone = phone; // שמור phone לאיפוס
 
   // ===== IDLE =====
   if (s.step === 'idle') {
@@ -734,7 +735,9 @@ async function finishAssign(s, techName, phone) {
   // עדכון קבוצה
   const groupMsg = `✅ ${machine.site_name}${machine.location?' | '+machine.location:''} | ${machine.machine_type}\n🔧 שויך ל${techName}`;
 
-  s.step = 'idle';
+  // אפס סשן מלא
+  const phone2 = s._phone;
+  sessions[phone2] = { step: 'idle' };
   return `📲 פרטי לאורי:\n✅ שויך ל${techName}\n\n📲 פרטי ל${techName}:\n${techMsg}\n\n📲 קבוצה:\n${groupMsg}`;
 }
 
