@@ -83,10 +83,18 @@ async function searchCustomers(clientName, cityName) {
 }
 
 async function getCustomerMachines(siteName) {
-  // כל המכונות של אותו לקוח (לפי שם דומה)
-  const baseName = siteName.split('(')[0].split('-')[0].trim().slice(0,15);
-  const {data} = await supabase.from('customers').select('*').ilike('site_name','%'+baseName+'%').eq('is_active',true).limit(10);
-  return data || [];
+  // חפש לפי שם מדויק (לפני הסוגריים) + customer_id זהה
+  // קודם מצא את הלקוח המדויק
+  const {data: exact} = await supabase.from('customers').select('*').eq('site_name', siteName).eq('is_active',true).limit(1);
+  
+  if (exact && exact.length > 0 && exact[0].customer_id) {
+    // מצא כל המכונות עם אותו customer_id
+    const {data} = await supabase.from('customers').select('*').eq('customer_id', exact[0].customer_id).eq('is_active',true).limit(15);
+    return data || [];
+  }
+  
+  // fallback - חפש לפי שם מדויק בלבד
+  return exact || [];
 }
 
 async function getHistory(siteCode, limit=2) {
