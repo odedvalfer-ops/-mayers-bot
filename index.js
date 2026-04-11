@@ -507,6 +507,13 @@ async function handleMessage(from, body) {
         actions: s.actions,
         parts: s.parts
       }).eq('machine_type', s.labMachine).is('completed_at', null);
+      // עדכן מלאי
+      if (s.parts && s.parts.length > 0) {
+        for (const part of s.parts) {
+          await deductInventory(part);
+        }
+      }
+      
       s.step = 'idle';
       return `✅ עבודת מעבדה הושלמה\n🔧 ${s.labMachine} | ${actText}${partsText}`;
     }
@@ -605,6 +612,17 @@ async function doCloseTicket(s) {
   const hist3 = await getHistory(siteCode, 3);
   const recent = await countRecent(siteCode);
 
+  // עדכן מלאי אם הוחלפו חלקים
+  let inventoryAlerts = '';
+  if (s.parts && s.parts.length > 0) {
+    for (const part of s.parts) {
+      const result = await deductInventory(part);
+      if (result && result.newQty < 5) {
+        inventoryAlerts += `\n⚠️ מלאי נמוך: ${result.name} — נותרו ${result.newQty}`;
+      }
+    }
+  }
+
   const c = ticket?.customers;
   const actText = s.actions.join(' + ');
   const partsText = s.parts?.length ? ` | חלקים: ${s.parts.join(', ')}` : '';
@@ -671,6 +689,49 @@ async function readDeliveryNote(imageUrl) {
   if (!data.content || !data.content[0]) throw new Error('No response from Claude');
   const text = data.content[0].text;
   return JSON.parse(text.replace(/```json|```/g, '').trim());
+}
+
+
+// מיפוי חלקים לקודי מלאי
+const PART_TO_INVENTORY = {
+  'נשם': 'נשם חלב',
+  'ברז חשמלי': 'ברז',
+  'קפוצינטור': 'קפוצינטור',
+  'יחידת חליטה': 'יחידת חליטה',
+  'טרמובלוק (דוד)': 'מכלול דוד שלם'
+};
+
+async function deductInventory(partName) {
+  // מצא את הפריט במלאי לפי שם חלקי
+  const searchName = PART_TO_INVENTORY[partName] || partName;
+  const {data: items} = await supabase
+    .from('inventory')
+    .select('id, part_name, quantity')
+    .ilike('part_name', '%'+searchName+'%')
+    .limit(1);
+  
+  if (!items || !items.length) return null;
+  
+  const item = items[0];
+  const newQty = Math.max(0, (item.quantity || 0) - 1);
+  
+  await supabase
+    .from('inventory')
+    .update({ quantity: newQty, updated_at: new Date().toISOString() })
+    .eq('id', item.id);
+  
+  return { name: item.part_name, oldQty: item.quantity, newQty };
+}
+
+async function checkLowInventory() {
+  // בדוק פריטים עם כמות נמוכה (פחות מ-5)
+  const {data} = await supabase
+    .from('inventory')
+    .select('part_name, quantity')
+    .lt('quantity', 5)
+    .gt('quantity', -1)
+    .order('quantity');
+  return data || [];
 }
 
 // ===== סיכום יומי אלכס ב-18:00 =====
