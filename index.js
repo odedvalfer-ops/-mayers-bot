@@ -82,18 +82,26 @@ async function searchCustomers(clientName, cityName) {
   return data.slice(0,8);
 }
 
-async function getCustomerMachines(siteName) {
-  // חפש לפי שם מדויק (לפני הסוגריים) + customer_id זהה
+async function getCustomerMachines(siteName, cityName='') {
   // קודם מצא את הלקוח המדויק
   const {data: exact} = await supabase.from('customers').select('*').eq('site_name', siteName).eq('is_active',true).limit(1);
   
   if (exact && exact.length > 0 && exact[0].customer_id) {
     // מצא כל המכונות עם אותו customer_id
-    const {data} = await supabase.from('customers').select('*').eq('customer_id', exact[0].customer_id).eq('is_active',true).limit(15);
-    return data || [];
+    let query = supabase.from('customers').select('*').eq('customer_id', exact[0].customer_id).eq('is_active',true);
+    
+    // אם יש עיר — סנן לפיה
+    if (cityName && cityName.length > 1) {
+      query = query.ilike('city', '%'+cityName+'%');
+    }
+    
+    const {data} = await query.limit(15);
+    if (data && data.length > 0) return data;
+    
+    // אם לא נמצא עם עיר — החזר את המכונה המקורית בלבד
+    return exact;
   }
   
-  // fallback - חפש לפי שם מדויק בלבד
   return exact || [];
 }
 
@@ -251,6 +259,7 @@ async function handleMessage(from, body) {
       if (!customers.length) return `לא מצאתי לקוח בשם "${clientName}"${cityName?' ב'+cityName:''} — בדוק את השם ונסה שוב.`;
 
       s.faultDesc = msg;
+      s.cityName = cityName; // שמור עיר לסינון מכונות
 
       // עדכון קבוצה
       const groupUpdate = `✅ תקלה נרשמה — ${customers[0].site_name}\n⏳ ממתין לפרטי מכונה`;
@@ -521,8 +530,8 @@ async function handleMessage(from, body) {
 // ===== HELPERS =====
 
 async function handleOneCustomer(s, customer, phone, groupUpdate) {
-  // בדוק כמה מכונות לאותו לקוח
-  const machines = await getCustomerMachines(customer.site_name);
+  // בדוק כמה מכונות לאותו לקוח — סנן לפי עיר אם יש
+  const machines = await getCustomerMachines(customer.site_name, s.cityName || '');
 
   if (machines.length > 1) {
     s.step = 'select_machine';
