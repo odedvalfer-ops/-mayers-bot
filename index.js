@@ -681,7 +681,19 @@ async function readDeliveryNote(imageUrl) {
           },
           {
             type: 'text',
-            text: 'זוהי תעודת משלוח של מכונת קפה. חלץ את הפרטים הבאים בפורמט JSON בלבד ללא שום טקסט נוסף. שים לב: איש הקשר ומספר הטלפון הם של הלקוח עצמו (מופיע בחלק העליון של התעודה תחת "לכבוד"), לא של מנהל התיק או הנהג: { "client_name": "שם הלקוח", "address": "כתובת מלאה", "city": "עיר", "machine_type": "סוג מכונה", "contact_name": "שם איש קשר של הלקוח", "contact_phone": "טלפון של הלקוח", "delivery_note_number": "מספר תעודה", "driver": "שם הנהג" }'
+            text: `זוהי תעודת משלוח של מכונת קפה ממאיירס. חלץ את הפרטים הבאים בפורמט JSON בלבד ללא שום טקסט נוסף.
+
+הנחיות חשובות:
+- client_name: שם הלקוח מהשדה "לכבוד" בחלק העליון
+- address: הכתובת מתחת לשם הלקוח
+- city: העיר מתחת לכתובת  
+- machine_type: סוג המכונה (M12, F16, F15 וכו')
+- contact_phone: מספר הטלפון שמופיע ליד "נייד" בחלק העליון (של הלקוח) - לא המספר בתחתית
+- contact_name: שם איש הקשר של הלקוח אם מופיע
+- delivery_note_number: מספר התעודה
+- driver: שם הנהג
+
+{ "client_name": "", "address": "", "city": "", "machine_type": "", "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }`
           }
         ]
       }]
