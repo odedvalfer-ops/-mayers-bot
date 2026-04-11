@@ -208,7 +208,9 @@ function extractClientAndCity(msg) {
 // ===== MAIN HANDLER =====
 // ===== זיהוי משתמשים לפי טלפון =====
 function getUserRole(phone) {
-  const num = phone.replace('+','').replace(/^0/,'972');
+  // phone comes as "972505771762" (already without + from whatsapp: strip)
+  const num = phone.replace(/^\+/,'').replace(/^0/,'972');
+  console.log('getUserRole:', phone, '->', num, '| ORI:', process.env.PHONE_ORI, '| ODED:', process.env.PHONE_ODED);
   const roles = {
     [process.env.PHONE_ORI]:      { name: 'אורי',   role: 'manager' },
     [process.env.PHONE_AVSHALOM]: { name: 'אבשלום', role: 'technician' },
