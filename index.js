@@ -206,12 +206,31 @@ function extractClientAndCity(msg) {
 }
 
 // ===== MAIN HANDLER =====
+// ===== זיהוי משתמשים לפי טלפון =====
+function getUserRole(phone) {
+  const num = phone.replace('+','').replace(/^0/,'972');
+  const roles = {
+    [process.env.PHONE_ORI]:      { name: 'אורי',   role: 'manager' },
+    [process.env.PHONE_AVSHALOM]: { name: 'אבשלום', role: 'technician' },
+    [process.env.PHONE_BENIA]:    { name: 'בניה',   role: 'technician' },
+    [process.env.PHONE_SHAKED]:   { name: 'שקד',    role: 'technician' },
+    [process.env.PHONE_ALEX]:     { name: 'אלכס',   role: 'lab' },
+    [process.env.PHONE_GABI]:     { name: 'גבי',    role: 'installations' },
+    [process.env.PHONE_DUDI]:     { name: 'דודי',   role: 'agent' },
+    [process.env.PHONE_AMIR]:     { name: 'אמיר',   role: 'agent' },
+  };
+  return roles[num] || { name: null, role: 'unknown' };
+}
+
 async function handleMessage(from, body) {
   const phone = from.replace('whatsapp:','');
   const msg = body.trim();
   if (!sessions[phone]) sessions[phone] = {step:'idle'};
   const s = sessions[phone];
-  s._phone = phone; // שמור phone לאיפוס
+  s._phone = phone;
+  const user = getUserRole(phone);
+  s.userName = user.name;
+  s.userRole = user.role;
 
   // ===== IDLE =====
   if (s.step === 'idle') {
