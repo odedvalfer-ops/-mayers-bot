@@ -206,6 +206,21 @@ function extractClientAndCity(msg) {
 }
 
 // ===== MAIN HANDLER =====
+// ===== שליחת WhatsApp ישירה =====
+async function sendWhatsApp(toPhone, message) {
+  try {
+    const to = toPhone.startsWith('+') ? toPhone : '+' + toPhone;
+    await twilioClient.messages.create({
+      from: 'whatsapp:+972584820015',
+      to: `whatsapp:${to}`,
+      body: message
+    });
+    console.log('✅ נשלח ל', to);
+  } catch(e) {
+    console.error('❌ שגיאה בשליחה ל', toPhone, e.message);
+  }
+}
+
 // ===== זיהוי משתמשים לפי טלפון =====
 function getUserRole(phone) {
   // phone comes as "972505771762" (already without + from whatsapp: strip)
@@ -725,16 +740,33 @@ async function buildShiuach(s, machine, phone, groupUpdate='') {
 
   // הודעה לאורי
   let oriMsg = `📋 תקלה חדשה\n📍 ${machine.site_name}`;
-  if (machine.location) oriMsg += ` — ${machine.location}`;
+  if (machine.address) oriMsg += `\n📬 ${machine.address}`;
+  if (machine.city) oriMsg += `, ${machine.city}`;
+  if (machine.location) oriMsg += `\n🏢 ${machine.location}`;
+  oriMsg += `\n🔧 ${machine.machine_type}`;
   oriMsg += `\n⚠️ ${s.faultDesc}`;
   if (machine.contact_name) oriMsg += `\n👤 ${machine.contact_name}`;
-  if (machine.contact_phone) oriMsg += ` ${machine.contact_phone}`;
-  oriMsg += fmtHistory(hist);
+  if (machine.contact_phone) oriMsg += ` — ${machine.contact_phone}`;
+  // 2 תקלות אחרונות עם תאריכים
+  if (hist && hist.length > 0) {
+    oriMsg += `\n\n📜 תקלות אחרונות:`;
+    hist.slice(0,2).forEach(h => {
+      const date = (h.closed_at||'').slice(0,10);
+      const acts = h.actions?.join(' + ') || 'לא מצוין';
+      oriMsg += `\n🔧 ${date} — ${acts}`;
+    });
+  }
   if (recent >= 3) oriMsg += `\n⚠️ ${recent} תקלות ב-60 יום האחרונים`;
   oriMsg += `\n\n🔧 טיפל בעבר: ${prevTech || 'לא ידוע'}`;
   oriMsg += `\n\nלשייך ל${s.suggestedTech}?\n1️⃣ כן | 2️⃣ טכנאי אחר`;
 
-  return `${groupUpdate ? groupUpdate + '\n\n' : ''}📲 פרטי לאורי:\n${oriMsg}`;
+  // שלח לאורי ישירות ב-WhatsApp
+  const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+  for (const p of oriPhones) {
+    await sendWhatsApp(p, oriMsg);
+  }
+
+  return `${groupUpdate ? groupUpdate + '\n\n' : ''}📲 נשלח לאורי ✅`;
 }
 
 async function finishAssign(s, techName, phone) {
@@ -746,21 +778,42 @@ async function finishAssign(s, techName, phone) {
 
   // הודעה לטכנאי
   let techMsg = `📋 קריאה חדשה!\n📍 ${machine.site_name}`;
-  if (machine.location) techMsg += ` | ${machine.location}`;
-  techMsg += `\n🏙️ ${machine.city}\n🔧 ${machine.machine_type}\n⚠️ ${s.faultDesc}`;
+  if (machine.address) techMsg += `\n📬 ${machine.address}`;
+  if (machine.city) techMsg += `, ${machine.city}`;
+  if (machine.location) techMsg += `\n🏢 ${machine.location}`;
+  techMsg += `\n🔧 ${machine.machine_type}`;
+  techMsg += `\n⚠️ ${s.faultDesc}`;
   if (machine.contact_name) techMsg += `\n👤 ${machine.contact_name}`;
   if (machine.contact_phone) techMsg += ` — ${machine.contact_phone}`;
-  techMsg += fmtHistory(hist);
+  // 2 תקלות אחרונות עם תאריכים
+  if (hist && hist.length > 0) {
+    techMsg += `\n\n📜 תקלות אחרונות:`;
+    hist.slice(0,2).forEach(h => {
+      const date = (h.closed_at||'').slice(0,10);
+      const acts = h.actions?.join(' + ') || 'לא מצוין';
+      techMsg += `\n🔧 ${date} — ${acts}`;
+    });
+  }
   if (recent >= 3) techMsg += `\n⚠️ ${recent} תקלות ב-60 יום האחרונים`;
   techMsg += `\n\nכשתסיים — כתוב: סיימתי ${machine.site_name.split(' ')[0]}`;
 
   // עדכון קבוצה
   const groupMsg = `✅ ${machine.site_name}${machine.location?' | '+machine.location:''} | ${machine.machine_type}\n🔧 שויך ל${techName}`;
 
+  // שלח לטכנאי ישירות
+  const techPhones = {
+    'אבשלום': process.env.PHONE_AVSHALOM,
+    'בניה':   process.env.PHONE_BENIA,
+    'שקד':    process.env.PHONE_SHAKED,
+    'אלכס':   process.env.PHONE_ALEX,
+  };
+  const techPhone = techPhones[techName];
+  if (techPhone) await sendWhatsApp(techPhone, techMsg);
+
   // אפס סשן מלא
   const phone2 = s._phone;
   sessions[phone2] = { step: 'idle' };
-  return `📲 פרטי לאורי:\n✅ שויך ל${techName}\n\n📲 פרטי ל${techName}:\n${techMsg}\n\n📲 קבוצה:\n${groupMsg}`;
+  return `✅ שויך ל${techName}\n📲 הודעה נשלחה ל${techName}\n\n📲 קבוצה:\n${groupMsg}`;
 }
 
 async function doCloseTicket(s) {
