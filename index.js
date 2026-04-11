@@ -310,6 +310,49 @@ async function handleMessage(from, body) {
     return null;
   }
 
+  // ===== שיוך טכנאי לאיסוף =====
+  if (s.step === 'collection_assign') {
+    const idx = parseInt(msg) - 1;
+    if (idx >= 0 && idx < (s.techs||[]).length) {
+      const tech = s.techs[idx];
+      const note = s.pendingCollection;
+      const machines = s.collectionMachines || [];
+      const qty = note.machine_quantity || 1;
+
+      // הודעה לטכנאי
+      let machineInfo = machines.length > 0
+        ? '\n🔧 מכונות:\n' + machines.map((m,i) => `${i+1}️⃣ ${m.location||'לא מצוין'} | ${m.machine_type}`).join('\n')
+        : '';
+      
+      const techMsg = `🔄 משימת איסוף!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address}\n🔧 לאסוף ${qty} מכונות${machineInfo}\n👤 ${note.contact_name||''} ${note.contact_phone||''}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: נאסף`;
+
+      // אם יש כמה מכונות — צריך לדעת איזו/אילו
+      if (machines.length > qty) {
+        s.step = 'collection_select_machines';
+        s.collectionTech = tech;
+        s.collectionQty = qty;
+        const list = machines.map((m,i) => `${i+1}️⃣ ${m.location||'לא מצוין'} | ${m.machine_type} | ${m.city}`).join('\n');
+        return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}\n\nיש ${machines.length} מכונות — אילו ${qty} נאספות?\n${list}\n\nבחר ${qty} מספרים (לדוגמה: 1,3)`;
+      }
+
+      // מכונה אחת או כל המכונות
+      s.step = 'collection_confirm';
+      s.collectionTech = tech;
+      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
+    }
+    return 'בחר מספר מהרשימה';
+  }
+
+  // ===== בחירת מכונות לאיסוף =====
+  if (s.step === 'collection_select_machines') {
+    const selected = msg.split(',').map(n => parseInt(n.trim()) - 1).filter(i => i >= 0 && i < (s.collectionMachines||[]).length);
+    if (selected.length === 0) return 'בחר מספרים מהרשימה (לדוגמה: 1,3)';
+    s.selectedCollectionMachines = selected.map(i => s.collectionMachines[i]);
+    s.step = 'collection_confirm';
+    const list = s.selectedCollectionMachines.map(m => `• ${m.location||'לא מצוין'} | ${m.machine_type}`).join('\n');
+    return `✅ מכונות שנאספות:\n${list}\n\nממתין לאישור טכנאי (נאסף + תעודה)`;
+  }
+
   // ===== שיוך טכנאי להתקנה =====
   if (s.step === 'installation_assign') {
     const idx = parseInt(msg) - 1;
@@ -341,6 +384,12 @@ async function handleMessage(from, body) {
   // ===== סגירת התקנה =====
   if (msg === 'הותקן') {
     s.step = 'installation_confirm';
+    return 'שלח צילום של התעודה החתומה 📸';
+  }
+
+  // ===== סגירת איסוף =====
+  if (msg === 'נאסף') {
+    s.step = 'collection_photo';
     return 'שלח צילום של התעודה החתומה 📸';
   }
 
@@ -380,6 +429,67 @@ async function handleMessage(from, body) {
       return await finishAssign(s, techName, phone);
     }
     return `לשייך ל${s.suggestedTech}?\n1️⃣ כן | 2️⃣ טכנאי אחר`;
+  }
+
+  // ===== שיוך טכנאי לאיסוף =====
+  if (s.step === 'collection_assign') {
+    const idx = parseInt(msg) - 1;
+    if (idx >= 0 && idx < (s.techs||[]).length) {
+      const tech = s.techs[idx];
+      const note = s.pendingCollection;
+      const machineQty = note.machine_qty || 1;
+      
+      // שמור בסשן
+      s.collectionTech = tech;
+      s.step = 'idle';
+
+      // הודעה לטכנאי
+      const techMsg = `📤 משימת איסוף!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address || ''}\n🔧 ${note.machine_type} | כמות: ${machineQty}\n👤 ${note.contact_name || ''} — ${note.contact_phone || ''}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: נאסף`;
+
+      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
+    }
+    return 'בחר מספר מהרשימה';
+  }
+
+  // ===== סגירת איסוף =====
+  if (msg === 'נאסף' || msg.startsWith('נאסף ')) {
+    const clientWord = msg.replace('נאסף','').trim();
+    
+    // אם יש מכונות בסשן — השתמש בהן
+    let machines = s.collectionMachines || [];
+    
+    // אם אין בסשן או כתב שם לקוח — חפש במסד
+    if (machines.length === 0 && clientWord.length > 1) {
+      const {data} = await supabase.from('customers')
+        .select('site_code, site_name, city, location, machine_type')
+        .ilike('site_name', '%'+clientWord+'%')
+        .eq('is_active', true)
+        .limit(10);
+      machines = data || [];
+      s.collectionMachines = machines;
+    }
+    
+    if (machines.length === 0) {
+      return 'לא מצאתי מכונות — כתוב: נאסף [שם לקוח]';
+    }
+    
+    if (machines.length === 1) {
+      return await doCollectMachine(s, machines[0]);
+    }
+    
+    // כמה מכונות — בחר איזו
+    s.step = 'collection_which_machine';
+    const list = machines.map((m,i) => `${i+1}️⃣ ${m.site_name}${m.location?' | '+m.location:''} | ${m.machine_type} | ${m.city}`).join('\n');
+    return `איזו מכונה נאספה?\n${list}`;
+  }
+
+  if (s.step === 'collection_which_machine') {
+    const idx = parseInt(msg) - 1;
+    const machines = s.collectionMachines || [];
+    if (idx >= 0 && idx < machines.length) {
+      return await doCollectMachine(s, machines[idx]);
+    }
+    return 'בחר מספר מהרשימה';
   }
 
   // ===== בחירת טכנאי ידנית =====
@@ -684,17 +794,19 @@ async function readDeliveryNote(imageUrl) {
             text: `This is a delivery note from Mayer's Coffee. Extract the following fields as JSON only, no extra text.
 
 Instructions:
+- note_type: "התקנה" if this is a new installation, "איסוף" if this is a collection/return (look for the words "סיום התקשרות" or "איסוף" in the document)
 - client_name: the customer name from the "לכבוד" (To) field at the top right - write exactly as appears, no spaces between letters
 - address: the street address below the customer name
 - city: the city below the address
 - machine_type: machine model like M12, F16, F15 from the items table
+- machine_quantity: the quantity number from the "כמות" column in the items table (integer)
 - contact_phone: the phone number next to the word "נייד" (mobile) in the top section - this is the customer phone
 - contact_name: customer contact person name if shown
 - delivery_note_number: the document number "מס'"
 - driver: driver name at the bottom
 
 Return only this JSON:
-{ "client_name": "", "address": "", "city": "", "machine_type": "", "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }`
+{ "note_type": "", "client_name": "", "address": "", "city": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }`
           }
         ]
       }]
@@ -750,6 +862,22 @@ async function checkLowInventory() {
   return data || [];
 }
 
+// ===== סגירת איסוף =====
+async function doCollectMachine(s, machine) {
+  const note = s.pendingCollection;
+  
+  if (machine) {
+    await supabase.from('customers').update({ is_active: false }).eq('site_code', machine.site_code);
+  }
+  
+  s.step = 'idle';
+  const name = note?.client_name || '';
+  const machineType = machine?.machine_type || note?.machine_type || '';
+  const location = machine?.location ? ' | ' + machine.location : '';
+  
+  return `✅ קבוצה:\n📤 ${name}${location} | ${machineType}\n🔧 מכונה נאספה ✓`;
+}
+
 // ===== סיכום יומי אלכס ב-18:00 =====
 async function sendDailySummaryAlex() {
   const today = new Date();
@@ -798,14 +926,13 @@ app.post('/webhook', async (req, res) => {
       if (!sessions[phone]) sessions[phone] = {step:'idle'};
       const s = sessions[phone];
 
-      // אם בשלב installation_confirm — זו תעודה עם חתימה (סגירה)
+      // אם בשלב installation_confirm — זו תעודה עם חתימה (סגירה התקנה)
       if (s.step === 'installation_confirm') {
         await supabase.from('installations').update({
           signed_note_url: mediaUrl,
           completed_at: new Date().toISOString()
         }).eq('id', s.installationId);
 
-        // עדכן לקוח חדש במסד
         if (s.pendingCustomer) {
           await supabase.from('customers').insert({
             site_code: 'NEW-' + Date.now(),
@@ -826,6 +953,27 @@ app.post('/webhook', async (req, res) => {
         return res.send(twiml.toString());
       }
 
+      // אם בשלב collection_photo — זו תעודה עם חתימה (סגירה איסוף)
+      if (s.step === 'collection_photo') {
+        // סמן מכונות שנאספו כלא פעילות
+        const machinesToDeactivate = s.selectedCollectionMachines || s.collectionMachines || [];
+        const qty = s.pendingCollection?.machine_quantity || 1;
+        const toDeactivate = machinesToDeactivate.slice(0, qty);
+
+        for (const machine of toDeactivate) {
+          await supabase.from('customers')
+            .update({ is_active: false })
+            .eq('id', machine.id);
+        }
+
+        const note = s.pendingCollection;
+        s.step = 'idle';
+        const twiml = new twilio.twiml.MessagingResponse();
+        twiml.message(`✅ איסוף הושלם!\n📍 ${note?.client_name || ''}\n🔧 ${toDeactivate.length} מכונות הוסרו ממסד הנתונים\n\n📲 קבוצה:\n🔄 ${note?.client_name || ''} — סיום התקשרות\n🔧 ${toDeactivate.length} מכונות נאספו על ידי ${s.collectionTech?.name || ''}`);
+        res.type('text/xml');
+        return res.send(twiml.toString());
+      }
+
       // אחרת — תעודה חדשה מגבי
       try {
         const noteData = await readDeliveryNote(mediaUrl);
@@ -835,7 +983,38 @@ app.post('/webhook', async (req, res) => {
         const techs = await getTechnicians();
         sessions[phone].techs = techs;
 
-        // בדוק אם לקוח קיים
+        const isCollection = noteData.note_type === 'איסוף';
+      const qty = noteData.machine_quantity || 1;
+
+      if (isCollection) {
+        // תהליך איסוף
+        const {data: existingMachines} = await supabase
+          .from('customers')
+          .select('id, site_name, city, location, machine_type, site_code')
+          .ilike('site_name', '%'+noteData.client_name.split(' ')[0]+'%')
+          .eq('is_active', true)
+          .limit(15);
+
+        sessions[phone].pendingCollection = noteData;
+        sessions[phone].collectionMachines = existingMachines || [];
+        sessions[phone].step = 'collection_assign';
+
+        let machineList = '';
+        if (existingMachines && existingMachines.length > 0) {
+          machineList = '\n\n🔧 מכונות במסד:\n' + existingMachines.map((m,i) =>
+            `${i+1}️⃣ ${m.location || 'לא מצוין'} | ${m.machine_type} | ${m.city}`
+          ).join('\n');
+        }
+
+        const collCard = `🔄 סיום התקשרות זוהה!\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type} | כמות: ${qty}\n📄 תעודה: ${noteData.delivery_note_number}${machineList}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+        
+        const twiml2 = new twilio.twiml.MessagingResponse();
+        twiml2.message(collCard);
+        res.type('text/xml');
+        return res.send(twiml2.toString());
+      }
+
+      // תהליך התקנה רגיל
       const {data: existingCustomer} = await supabase
         .from('customers')
         .select('site_name, city')
@@ -844,9 +1023,10 @@ app.post('/webhook', async (req, res) => {
         .limit(1);
       
       const isNew = !existingCustomer || existingCustomer.length === 0;
-      const customerStatus = isNew ? '🆕 לקוח חדש' : '✅ לקוח קיים';
+      const customerStatus = isNew ? `🆕 לקוח חדש` : `✅ לקוח קיים`;
+      const qtyText = qty > 1 ? ` | ${qty} מכונות` : '';
       
-      const card = `📦 התקנה חדשה זוהתה!\n${customerStatus}\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+      const card = `📦 התקנה חדשה זוהתה!\n${customerStatus}\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}${qtyText}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
         const twiml = new twilio.twiml.MessagingResponse();
         twiml.message(card);
