@@ -521,7 +521,7 @@ async function handleOneCustomer(s, customer, phone, groupUpdate) {
     s.machines = machines;
     s.faultCustomer = customer;
     const list = machines.map((m,i) =>
-      `${i+1}️⃣ ${m.location || 'לא מצוין'} | ${m.machine_type}`
+      `${i+1}️⃣ ${m.city || ''} | ${m.location || 'לא מצוין'} | ${m.machine_type}`
     ).join('\n');
     return `${groupUpdate}\n\n📲 פרטי אליך:\n` +
       `יש ${machines.length} מכונות ב${customer.site_name} — איזו?\n${list}`;
