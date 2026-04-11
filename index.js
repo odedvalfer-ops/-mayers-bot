@@ -681,7 +681,7 @@ async function readDeliveryNote(imageUrl) {
           },
           {
             type: 'text',
-            text: 'זוהי תעודת משלוח של מכונת קפה. חלץ את הפרטים הבאים בפורמט JSON בלבד ללא שום טקסט נוסף: { "client_name": "שם הלקוח", "address": "כתובת מלאה", "city": "עיר", "machine_type": "סוג מכונה", "contact_name": "איש קשר", "contact_phone": "טלפון", "delivery_note_number": "מספר תעודה", "driver": "שם הנהג" }'
+            text: 'זוהי תעודת משלוח של מכונת קפה. חלץ את הפרטים הבאים בפורמט JSON בלבד ללא שום טקסט נוסף. שים לב: איש הקשר ומספר הטלפון הם של הלקוח עצמו (מופיע בחלק העליון של התעודה תחת "לכבוד"), לא של מנהל התיק או הנהג: { "client_name": "שם הלקוח", "address": "כתובת מלאה", "city": "עיר", "machine_type": "סוג מכונה", "contact_name": "שם איש קשר של הלקוח", "contact_phone": "טלפון של הלקוח", "delivery_note_number": "מספר תעודה", "driver": "שם הנהג" }'
           }
         ]
       }]
@@ -822,7 +822,18 @@ app.post('/webhook', async (req, res) => {
         const techs = await getTechnicians();
         sessions[phone].techs = techs;
 
-        const card = `📦 התקנה חדשה זוהתה!\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+        // בדוק אם לקוח קיים
+      const {data: existingCustomer} = await supabase
+        .from('customers')
+        .select('site_name, city')
+        .ilike('site_name', '%'+noteData.client_name.split(' ')[0]+'%')
+        .eq('is_active', true)
+        .limit(1);
+      
+      const isNew = !existingCustomer || existingCustomer.length === 0;
+      const customerStatus = isNew ? '🆕 לקוח חדש' : '✅ לקוח קיים';
+      
+      const card = `📦 התקנה חדשה זוהתה!\n${customerStatus}\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
         const twiml = new twilio.twiml.MessagingResponse();
         twiml.message(card);
