@@ -64,22 +64,44 @@ const sessions = {};
 async function searchCustomers(clientName, cityName) {
   if (!clientName || clientName.length < 2) return [];
 
-  // חפש לפי שם לקוח
+  // שלב 1: חיפוש ישיר ilike
   const {data} = await supabase.from('customers').select('*')
     .ilike('site_name','%'+clientName+'%').eq('is_active',true).limit(20);
-  
-  if (!data || data.length === 0) return [];
-  
+
+  let results = data || [];
+
+  // שלב 2: אם לא נמצא — חפש לפי כל מילה בנפרד
+  if (results.length === 0) {
+    const words = clientName.split(/\s+/).filter(w => w.length > 2);
+    const seen = new Map();
+    for (const word of words) {
+      const {data: partial} = await supabase.from('customers').select('*')
+        .ilike('site_name','%'+word+'%').eq('is_active',true).limit(10);
+      (partial||[]).forEach(c => seen.set(c.site_code, c));
+    }
+    results = Array.from(seen.values());
+  }
+
+  // שלב 3: אם עדיין לא נמצא — חיפוש similarity עם pg_trgm
+  if (results.length === 0) {
+    const {data: similar} = await supabase.rpc('search_customers_fuzzy', {
+      search_term: clientName,
+      threshold: 0.2
+    });
+    results = similar || [];
+  }
+
+  if (!results.length) return [];
+
   // סנן לפי עיר אם יש
   if (cityName && cityName.length > 1) {
-    const filtered = data.filter(c => 
-      c.city?.includes(cityName) || 
-      c.site_name?.includes(cityName)
+    const filtered = results.filter(c => 
+      c.city?.includes(cityName) || c.site_name?.includes(cityName)
     );
     if (filtered.length > 0) return filtered.slice(0,8);
   }
-  
-  return data.slice(0,8);
+
+  return results.slice(0,8);
 }
 
 async function getCustomerMachines(siteName, cityName='') {
@@ -794,7 +816,8 @@ async function readDeliveryNote(imageUrl) {
             text: `This is a delivery note from Mayer's Coffee. Extract the following fields as JSON only, no extra text.
 
 Instructions:
-- note_type: "איסוף" if the items table contains "סיום התקשרות" or "איסוף מכונה" in the product name (שם פריט), otherwise "התקנה" 
+- note_type: "איסוף" if the items table contains "סיום התקשרות" or "איסוף מכונה" in the product name (שם פריט), otherwise "התקנה"
+- collection_location: if note_type is "איסוף", extract the collection address/city from the product name (שם פריט) - it usually appears after "איסוף מכונה M12 -" or similar
 - client_name: the customer name from the "לכבוד" (To) field at the top right - write exactly as appears INCLUDING spaces between words
 - address: the street address below the customer name
 - city: the city below the address
@@ -806,7 +829,7 @@ Instructions:
 - driver: driver name at the bottom
 
 Return only this JSON:
-{ "note_type": "", "client_name": "", "address": "", "city": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }`
+{ "note_type": "", "client_name": "", "address": "", "city": "", "collection_location": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }`
           }
         ]
       }]
@@ -988,12 +1011,26 @@ app.post('/webhook', async (req, res) => {
 
       if (isCollection) {
         // תהליך איסוף
-        const {data: existingMachines} = await supabase
-          .from('customers')
+        // חפש לפי שם + סנן לפי עיר
+        const firstWord = noteData.client_name.split(' ')[0];
+        let machineQuery = supabase.from('customers')
           .select('id, site_name, city, location, machine_type, site_code')
-          .ilike('site_name', '%'+noteData.client_name.split(' ')[0]+'%')
+          .ilike('site_name', '%'+firstWord+'%')
           .eq('is_active', true)
           .limit(15);
+        
+        const {data: allMachines} = await machineQuery;
+        // סנן לפי עיר אם יש
+        let existingMachines = allMachines || [];
+        // סנן לפי מיקום האיסוף (לא עיר הלקוח)
+        const filterCity = noteData.collection_location || noteData.city;
+        if (filterCity && existingMachines.length > 1) {
+          const filtered = existingMachines.filter(m => 
+            m.city?.includes(filterCity) || filterCity?.includes(m.city) ||
+            m.site_name?.includes(filterCity)
+          );
+          if (filtered.length > 0) existingMachines = filtered;
+        }
 
         sessions[phone].pendingCollection = noteData;
         sessions[phone].collectionMachines = existingMachines || [];
@@ -1006,7 +1043,8 @@ app.post('/webhook', async (req, res) => {
           ).join('\n');
         }
 
-        const collCard = `🔄 סיום התקשרות זוהה!\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type} | כמות: ${qty}\n📄 תעודה: ${noteData.delivery_note_number}${machineList}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+        const collectionCity = noteData.collection_location || noteData.city;
+        const collCard = `🔄 סיום התקשרות זוהה!\n📍 ${noteData.client_name}\n🏙️ מיקום איסוף: ${collectionCity}\n🔧 ${noteData.machine_type} | כמות: ${qty}\n📄 תעודה: ${noteData.delivery_note_number}${machineList}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
         
         const twiml2 = new twilio.twiml.MessagingResponse();
         twiml2.message(collCard);
