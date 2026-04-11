@@ -651,8 +651,11 @@ async function doCloseTicket(s) {
 
 // ===== קריאת תמונה עם Claude API =====
 async function readDeliveryNote(imageUrl) {
-  // הורד את התמונה
-  const imgResponse = await fetch(imageUrl);
+  // הורד את התמונה עם Twilio authentication
+  const authHeader = 'Basic ' + Buffer.from(`${process.env.TWILIO_SID}:${process.env.TWILIO_TOKEN}`).toString('base64');
+  const imgResponse = await fetch(imageUrl, {
+    headers: { 'Authorization': authHeader }
+  });
   const imgBuffer = await imgResponse.arrayBuffer();
   const imageData = Buffer.from(imgBuffer).toString('base64');
   const mediaType = imgResponse.headers.get('content-type') || 'image/jpeg';
