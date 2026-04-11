@@ -218,6 +218,7 @@ function getUserRole(phone) {
     [process.env.PHONE_GABI]:     { name: 'גבי',    role: 'installations' },
     [process.env.PHONE_DUDI]:     { name: 'דודי',   role: 'agent' },
     [process.env.PHONE_AMIR]:     { name: 'אמיר',   role: 'agent' },
+    [process.env.PHONE_ODED]:     { name: 'עודד',   role: 'manager' },
   };
   return roles[num] || { name: null, role: 'unknown' };
 }
