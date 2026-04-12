@@ -220,6 +220,24 @@ const techPhones = {
   'גבי':    process.env.PHONE_GABI,
 };
 
+// ===== שליחה לכולם =====
+async function broadcastAll(message) {
+  const allPhones = [
+    process.env.PHONE_ORI,
+    process.env.PHONE_ODED,
+    process.env.PHONE_AVSHALOM,
+    process.env.PHONE_BENIA,
+    process.env.PHONE_SHAKED,
+    process.env.PHONE_ALEX,
+    process.env.PHONE_GABI,
+    process.env.PHONE_DUDI,
+    process.env.PHONE_AMIR,
+  ].filter(Boolean);
+  for (const p of allPhones) {
+    await sendWhatsApp(p, message);
+  }
+}
+
 // ===== MAIN HANDLER =====
 async function handleMessage(from, body) {
   const phone = from.replace('whatsapp:','');
@@ -625,7 +643,10 @@ async function handleMessage(from, body) {
       const techPhone = techPhones[tech.name];
       if (techPhone) await sendWhatsApp(techPhone, techMsg);
 
-      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
+      const collectionOpenMsg = `🔄 איסוף נפתח\n📍 ${note.client_name}\n🏙️ ${note.city}\n🔧 ${note.machine_type} | כמות: ${qty}\n👨‍🔧 שויך ל${tech.name}`;
+      await broadcastAll(collectionOpenMsg);
+
+      return `✅ שויך ל${tech.name}`;
     }
     return 'בחר מספר מהרשימה';
   }
@@ -682,8 +703,9 @@ async function handleMessage(from, body) {
 
       const techPhone = techPhones[tech.name];
       if (techPhone) await sendWhatsApp(techPhone, techMsg);
+      await broadcastAll(groupMsg);
 
-      return `✅ שויך ל${tech.name}\n\n${groupMsg}`;
+      return `✅ שויך ל${tech.name}`;
     }
     return 'בחר מספר מהרשימה';
   }
@@ -725,6 +747,7 @@ async function handleMessage(from, body) {
     const groupMsg = `✅ התקנה הושלמה\n📍 ${s.pendingCustomer?.client_name} | ${s.pendingCustomer?.city}\n🔧 ${s.pendingCustomer?.machine_type} | כמות: ${qty}\n${locationList}\n👨‍🔧 ${s.installationTech?.name}`;
 
     s.step = 'idle';
+    await broadcastAll(groupMsg);
     return groupMsg;
   }
 
@@ -923,16 +946,17 @@ async function finishAssign(s, techName, phone) {
   if (recent >= 3) techMsg += `\n⚠️ ${recent} תקלות ב-60 יום`;
   techMsg += `\n\nכשתסיים — כתוב: סיימתי ${machine.site_name.split(' ')[0]}`;
 
-  // לקבוצה
+  // לקבוצה — broadcast לכולם
   const groupMsg = `🔧 תקלה חדשה\n📍 ${machine.site_name}${machine.location?' | '+machine.location:''}\n🔧 ${machine.machine_type}\n⚠️ ${s.faultDesc}\n👨‍🔧 שויך ל${techName}`;
 
   const techPhone = techPhones[techName];
   if (techPhone) await sendWhatsApp(techPhone, techMsg);
+  await broadcastAll(groupMsg);
 
   const phone2 = s._phone;
   sessions[phone2] = { step: 'idle' };
 
-  return `✅ שויך ל${techName}\n\n${groupMsg}`;
+  return `✅ שויך ל${techName}`;
 }
 
 async function doCloseTicket(s) {
@@ -971,7 +995,8 @@ async function doCloseTicket(s) {
   const groupMsg = `✅ ${c?.site_name||''} — ${s.closingMachine||c?.location||c?.machine_type||''}\n🔧 ${actText}${partsText}\n⏰ ${openTime} — ${closeTime}\n\n📜 2 תקלות אחרונות:\n${hist2Text||'אין היסטוריה'}${alerts}${inventoryAlerts}`;
 
   s.step = 'idle';
-  return `📲 קבוצה:\n${groupMsg}`;
+  await broadcastAll(groupMsg);
+  return `✅ תקלה נסגרה\n${groupMsg}`;
 }
 
 async function doCollectMachine(s, machine) {
@@ -987,9 +1012,7 @@ async function doCollectMachine(s, machine) {
 
   const groupMsg = `✅ קבוצה:\n📤 ${name}${location} | ${machineType}\n🔧 מכונה נאספה ✓${techName ? ' על ידי ' + techName : ''}`;
 
-  const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
-  for (const p of oriPhones) await sendWhatsApp(p, groupMsg);
-
+  await broadcastAll(groupMsg);
   return groupMsg;
 }
 
