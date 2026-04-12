@@ -231,6 +231,12 @@ async function handleMessage(from, body) {
   s.userName = user.name;
   s.userRole = user.role;
 
+  // ===== איפוס =====
+  if (msg === 'איפוס' || msg === 'reset') {
+    sessions[phone] = { step: 'idle' };
+    return '✅ סשן אופס — אפשר להתחיל מחדש';
+  }
+
   // ===== מה פתוח =====
   if (msg === 'מה פתוח') {
     return await handleWhatOpen(s, user);
