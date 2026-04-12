@@ -452,12 +452,6 @@ async function handleMessage(from, body) {
     return 'שלח צילום של התעודה החתומה 📸';
   }
 
-  // ===== סגירת איסוף =====
-  if (msg === 'נאסף') {
-    s.step = 'collection_photo';
-    return 'שלח צילום של התעודה החתומה 📸';
-  }
-
   // ===== בחירת לקוח =====
   if (s.step === 'select_customer') {
     const idx = parseInt(msg) - 1;
@@ -496,28 +490,8 @@ async function handleMessage(from, body) {
     return `לשייך ל${s.suggestedTech}?\n1️⃣ כן | 2️⃣ טכנאי אחר`;
   }
 
-  // ===== שיוך טכנאי לאיסוף =====
-  if (s.step === 'collection_assign') {
-    const idx = parseInt(msg) - 1;
-    if (idx >= 0 && idx < (s.techs||[]).length) {
-      const tech = s.techs[idx];
-      const note = s.pendingCollection;
-      const machineQty = note.machine_qty || 1;
-      
-      // שמור בסשן
-      s.collectionTech = tech;
-      s.step = 'idle';
-
-      // הודעה לטכנאי
-      const techMsg = `📤 משימת איסוף!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address || ''}\n🔧 ${note.machine_type} | כמות: ${machineQty}\n👤 ${note.contact_name || ''} — ${note.contact_phone || ''}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: נאסף`;
-
-      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
-    }
-    return 'בחר מספר מהרשימה';
-  }
-
-  // ===== סגירת איסוף =====
-  if (msg === 'נאסף' || msg.startsWith('נאסף ')) {
+  // ===== סגירת איסוף — טכנאי שולח "נאסף" לפתיחת תהליך =====
+  if ((msg === 'נאסף' || msg.startsWith('נאסף ')) && s.step !== 'collection_photo' && s.step !== 'collection_which_machine') {
     const clientWord = msg.replace('נאסף','').trim();
     
     // אם יש מכונות בסשן — השתמש בהן
@@ -812,6 +786,7 @@ async function finishAssign(s, techName, phone) {
     'בניה':   process.env.PHONE_BENIA,
     'שקד':    process.env.PHONE_SHAKED,
     'אלכס':   process.env.PHONE_ALEX,
+    'גבי':    process.env.PHONE_GABI,
   };
   const techPhone = techPhones[techName];
   if (techPhone) await sendWhatsApp(techPhone, techMsg);
@@ -980,11 +955,20 @@ async function doCollectMachine(s, machine) {
   }
   
   s.step = 'idle';
-  const name = note?.client_name || '';
+  const name = note?.client_name || machine?.site_name || '';
   const machineType = machine?.machine_type || note?.machine_type || '';
   const location = machine?.location ? ' | ' + machine.location : '';
-  
-  return `✅ קבוצה:\n📤 ${name}${location} | ${machineType}\n🔧 מכונה נאספה ✓`;
+  const techName = s.collectionTech?.name || '';
+
+  const groupMsg = `✅ קבוצה:\n📤 ${name}${location} | ${machineType}\n🔧 מכונה נאספה ✓${techName ? ' על ידי ' + techName : ''}`;
+
+  // שלח לאורי ועודד
+  const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+  for (const p of oriPhones) {
+    await sendWhatsApp(p, groupMsg);
+  }
+
+  return groupMsg;
 }
 
 // ===== סיכום יומי אלכס ב-18:00 =====
@@ -1009,8 +993,12 @@ async function sendDailySummaryAlex() {
   });
   summary += `\nסה"כ: ${jobs.length} מכונות תוקנו`;
   
-  console.log('סיכום יומי אלכס:', summary);
-  // כשיהיה מספר אמיתי — לשלוח לאורי
+  // שלח לאורי ועודד
+  const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+  for (const p of oriPhones) {
+    await sendWhatsApp(p, summary);
+  }
+  console.log('סיכום יומי אלכס נשלח:', summary);
 }
 
 // הרץ כל דקה ובדוק אם 18:00
