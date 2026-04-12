@@ -313,7 +313,17 @@ async function handleMessage(from, body) {
       let customers = await searchCustomers(clientName, cityName);
       if (!customers.length) return `לא מצאתי לקוח בשם "${clientName}"${cityName?' ב'+cityName:''} — בדוק את השם ונסה שוב.`;
 
-      s.faultDesc = msg;
+      // חלץ רק את תיאור התקלה — הסר שם לקוח, עיר, מילות תקלה
+      let faultOnly = msg;
+      if (cityName) faultOnly = faultOnly.split(cityName).join(' ');
+      // הסר שם לקוח
+      const clientWords = clientText.split(' ');
+      clientWords.forEach(w => { if (w.length > 1) faultOnly = faultOnly.split(w).join(' '); });
+      // נקה
+      faultOnly = faultOnly.replace(/[^א-תA-Za-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
+      // אם נשאר רק "תקלה" — השתמש בהודעה המקורית
+      if (faultOnly.length < 3 || faultOnly === 'תקלה') faultOnly = msg;
+      s.faultDesc = faultOnly;
       s.cityName = cityName;
 
       if (customers.length === 1) {
