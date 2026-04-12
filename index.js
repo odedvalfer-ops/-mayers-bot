@@ -209,7 +209,12 @@ function extractClientAndCity(msg) {
 // ===== שליחת WhatsApp ישירה =====
 async function sendWhatsApp(toPhone, message) {
   try {
-    const to = toPhone.startsWith('+') ? toPhone : '+' + toPhone;
+    // נקה ופרמט מספר — תמיד +972XXXXXXXXX
+    let num = String(toPhone).replace(/\D/g,'');
+    if (num.startsWith('0')) num = '972' + num.slice(1);
+    if (!num.startsWith('972')) num = '972' + num;
+    const to = '+' + num;
+    console.log('📤 שולח ל:', to);
     await twilioClient.messages.create({
       from: 'whatsapp:+972584820015',
       to: `whatsapp:${to}`,
@@ -217,7 +222,7 @@ async function sendWhatsApp(toPhone, message) {
     });
     console.log('✅ נשלח ל', to);
   } catch(e) {
-    console.error('❌ שגיאה בשליחה ל', toPhone, e.message);
+    console.error('❌ שגיאה בשליחה:', toPhone, e.message);
   }
 }
 
@@ -766,7 +771,8 @@ async function buildShiuach(s, machine, phone, groupUpdate='') {
     await sendWhatsApp(p, oriMsg);
   }
 
-  return `${groupUpdate ? groupUpdate + '\n\n' : ''}📲 נשלח לאורי ✅`;
+  // החזר לפותח רק את עדכון הקבוצה
+  return groupUpdate || '✅ תקלה נרשמה';
 }
 
 async function finishAssign(s, techName, phone) {
@@ -813,7 +819,9 @@ async function finishAssign(s, techName, phone) {
   // אפס סשן מלא
   const phone2 = s._phone;
   sessions[phone2] = { step: 'idle' };
-  return `✅ שויך ל${techName}\n📲 הודעה נשלחה ל${techName}\n\n📲 קבוצה:\n${groupMsg}`;
+  
+  // החזר לאורי אישור קצר
+  return `✅ שויך ל${techName} — הודעה נשלחה`;
 }
 
 async function doCloseTicket(s) {
