@@ -327,7 +327,7 @@ async function handleMessage(from, body) {
       s.cityName = cityName; // שמור עיר לסינון מכונות
 
       // עדכון קבוצה
-      const groupUpdate = `✅ תקלה נרשמה — ${customers[0].site_name}\n⏳ ממתין לפרטי מכונה`;
+      const groupUpdate = `✅ תקלה נרשמה — ${customers[0].site_name}`;
 
       if (customers.length === 1) {
         return await handleOneCustomer(s, customers[0], phone, groupUpdate);
@@ -472,23 +472,7 @@ async function handleMessage(from, body) {
   }
 
   // ===== שיוך טכנאי (אורי בוחר) =====
-  if (s.step === 'assign_tech') {
-    const idx = parseInt(msg) - 1;
-    const techs = s.techs || [];
-
-    if (msg === '2' || msg.toLowerCase() === 'אחר') {
-      // הצג רשימת כל טכנאים
-      s.step = 'assign_tech_pick';
-      return 'בחר טכנאי:\n' + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
-    }
-
-    if (msg === '1') {
-      // שייך לטכנאי המומלץ
-      const techName = s.suggestedTech;
-      return await finishAssign(s, techName, phone);
-    }
-    return `לשייך ל${s.suggestedTech}?\n1️⃣ כן | 2️⃣ טכנאי אחר`;
-  }
+  // step assign_tech_pick is handled below
 
   // ===== סגירת איסוף — טכנאי שולח "נאסף" לפתיחת תהליך =====
   if ((msg === 'נאסף' || msg.startsWith('נאסף ')) && s.step !== 'collection_photo' && s.step !== 'collection_which_machine') {
@@ -714,8 +698,7 @@ async function buildShiuach(s, machine, phone, groupUpdate='') {
   const ticket = await openTicket(machine.site_code, machine.location, s.faultDesc, s.userName || phone);
   s.ticket = ticket;
   s.techs = techs;
-  s.suggestedTech = prevTech || techs[0]?.name;
-  s.step = 'assign_tech';
+  s.step = 'assign_tech_pick';
 
   // הודעה לאורי
   let oriMsg = `📋 תקלה חדשה\n📍 ${machine.site_name}`;
@@ -737,7 +720,7 @@ async function buildShiuach(s, machine, phone, groupUpdate='') {
   }
   if (recent >= 3) oriMsg += `\n⚠️ ${recent} תקלות ב-60 יום האחרונים`;
   oriMsg += `\n\n🔧 טיפל בעבר: ${prevTech || 'לא ידוע'}`;
-  oriMsg += `\n\nלשייך ל${s.suggestedTech}?\n1️⃣ כן | 2️⃣ טכנאי אחר`;
+  oriMsg += `\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
   // שלח לאורי ישירות ב-WhatsApp
   const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
