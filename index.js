@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const twilio = require('twilio');
 const { createClient } = require('@supabase/supabase-js');
-const https = require('https');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -13,42 +12,35 @@ const twilioClient = twilio(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
 const TWILIO_NUMBER = 'whatsapp:+972584820015';
 
 // ===== תפריטים =====
-const ACTION_MENU = 'מה עשית?\n1️⃣ טיפול אבנית\n2️⃣ ניקיון מערכת הקצפה\n3️⃣ טיפול כדורית — יחידת חליטה\n4️⃣ החלפת חלק\n5️⃣ החלפת מכונה';
-const MORE_MENU = 'עשית משהו נוסף?\n1️⃣ טיפול אבנית\n2️⃣ ניקיון מערכת הקצפה\n3️⃣ טיפול כדורית — יחידת חליטה\n4️⃣ החלפת חלק\n5️⃣ החלפת מכונה\n6️⃣ לא — סגור תקלה';
-const PART_MENU = 'איזה חלק?\n1️⃣ נשם\n2️⃣ ברז חשמלי\n3️⃣ קפוצינטור\n4️⃣ יחידת חליטה\n5️⃣ טרמובלוק (דוד)';
+const ACTION_MENU = 'מה עשית?\n1️⃣ החלפת מכונה\n2️⃣ טיפול אבנית\n3️⃣ טיפול מטחנה\n4️⃣ ניקיון הקצפה\n5️⃣ החלפת חלק\n6️⃣ אחר — ציין ידנית';
+const MORE_MENU = 'עשית משהו נוסף?\n1️⃣ החלפת מכונה\n2️⃣ טיפול אבנית\n3️⃣ טיפול מטחנה\n4️⃣ ניקיון הקצפה\n5️⃣ החלפת חלק\n6️⃣ אחר — ציין ידנית\n7️⃣ לא — סגור תקלה';
+const PART_MENU = 'איזה חלק?\n1️⃣ ברז חשמלי\n2️⃣ תבריג\n3️⃣ צינורית חלב\n4️⃣ נשם\n5️⃣ מקרר\n6️⃣ קפוצינטור\n7️⃣ בילט\n8️⃣ יחידת חליטה\n9️⃣ אחר — ציין ידנית';
 
-const ACTIONS = {'1':'טיפול אבנית','2':'ניקיון מערכת הקצפה','3':'טיפול כדורית — יחידת חליטה','4':'החלפת חלק','5':'החלפת מכונה'};
-const PARTS = {'1':'נשם','2':'ברז חשמלי','3':'קפוצינטור','4':'יחידת חליטה','5':'טרמובלוק (דוד)'};
+const ACTIONS = {'1':'החלפת מכונה','2':'טיפול אבנית','3':'טיפול מטחנה','4':'ניקיון הקצפה','5':'החלפת חלק','6':'אחר'};
+const PARTS = {'1':'ברז חשמלי','2':'תבריג','3':'צינורית חלב','4':'נשם','5':'מקרר','6':'קפוצינטור','7':'בילט','8':'יחידת חליטה','9':'אחר'};
 const FAULT_WORDS = ['תקלה','לא מושך','לא מקציף','לא עובד','לא נדלק','לא יוצא','לא פועל','להחליף','לא מחמם'];
 const STOP_WORDS = new Set(['לא','של','את','עם','על','אל','כן','בלי','רק','תקלה','מושך','מקציף','עובד','נדלק','יוצא','פועל','מחמם']);
 
-// רשימת ערים ישראליות
 const ISRAEL_CITIES = new Set([
   'תל אביב','ירושלים','חיפה','ראשון לציון','פתח תקווה','אשדוד','נתניה','באר שבע',
   'בני ברק','חולון','רמת גן','אשקלון','רחובות','בת ים','בית שמש','קריית גת',
   'הרצליה','חדרה','מודיעין','לוד','רמלה','עכו','אילת','נצרת','עפולה',
   'ראש העין','קריית אתא','קריית ביאליק','קריית מוצקין','קריית ים','קריית שמונה',
-  'הוד השרון','נס ציונה','טבריה','צפת','כפר סבא','רעננה','הרצליה','רמת השרון',
-  'גבעתיים','רמת גן','בני ברק','קריית אונו','גיבתיים','אור יהודה','קריית מלאכי',
-  'דימונה','ערד','מצפה רמון','נהריה','טירת כרמל','קריית חיים','קריית שמואל',
-  'יוקנעם','זכרון יעקב','קיסריה','עמק יזרעאל','עמק חפר','שרון','שפלה',
-  'אבן יהודה','כפר יונה','נתיבות','שדרות','אופקים','ירוחם','מגדל העמק',
-  'נשר','טמרה','שפרעם','סכנין','אום אל פחם','בית שאן','בית שמש',
-  'מעלה אדומים','ביתר עילית','אלעד','מודיעין עילית','ביתר','רכסים',
-  'פרדס חנה','בנימינה','זיכרון','גבעת שמואל','גני תקווה','אור עקיבא',
-  'חריש','נוף הגליל','מגדל העמק','קריית טבעון','טירה','קלנסווה',
-  'יבנה','גדרה','מזכרת בתיה','באר יעקב','נס ציונה','גן רוה',
-  'פתחיה','שוהם','ראש העין','כפר קאסם','טייבה','כפר יאסיף',
-  'בארי','שדות נגב','אשכול','מרחבים','בני שמעון'
+  'הוד השרון','נס ציונה','טבריה','צפת','כפר סבא','רעננה','רמת השרון',
+  'גבעתיים','קריית אונו','אור יהודה','קריית מלאכי','דימונה','ערד','מצפה רמון',
+  'נהריה','טירת כרמל','יוקנעם','זכרון יעקב','קיסריה','אבן יהודה','כפר יונה',
+  'נתיבות','שדרות','אופקים','ירוחם','מגדל העמק','נשר','טמרה','שפרעם','סכנין',
+  'אום אל פחם','בית שאן','מעלה אדומים','ביתר עילית','אלעד','מודיעין עילית',
+  'פרדס חנה','בנימינה','גבעת שמואל','גני תקווה','אור עקיבא','חריש','נוף הגליל',
+  'קריית טבעון','טירה','קלנסווה','יבנה','גדרה','מזכרת בתיה','באר יעקב',
+  'שוהם','כפר קאסם','טייבה','כפר יאסיף'
 ]);
 
 function extractCityFromMsg(msg) {
-  // חפש עיר של שתי מילים קודם
   const twoCities = Array.from(ISRAEL_CITIES).filter(c => c.includes(' '));
   for (const city of twoCities) {
     if (msg.includes(city)) return city;
   }
-  // עיר של מילה אחת
   const oneCities = Array.from(ISRAEL_CITIES).filter(c => !c.includes(' '));
   const words = msg.split(/\s+/);
   for (const word of words) {
@@ -57,20 +49,26 @@ function extractCityFromMsg(msg) {
   return '';
 }
 
+function fmtDate(iso) {
+  if (!iso) return '?';
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function fmtTime(iso) {
+  if (!iso) return '?';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
 
 const sessions = {};
 
 // ===== DB =====
 async function searchCustomers(clientName, cityName) {
   if (!clientName || clientName.length < 2) return [];
-
-  // שלב 1: חיפוש ישיר ilike
   const {data} = await supabase.from('customers').select('*')
     .ilike('site_name','%'+clientName+'%').eq('is_active',true).limit(20);
-
   let results = data || [];
-
-  // שלב 2: אם לא נמצא — חפש לפי כל מילה בנפרד
   if (results.length === 0) {
     const words = clientName.split(/\s+/).filter(w => w.length > 2);
     const seen = new Map();
@@ -81,49 +79,31 @@ async function searchCustomers(clientName, cityName) {
     }
     results = Array.from(seen.values());
   }
-
-  // שלב 3: אם עדיין לא נמצא — חיפוש similarity עם pg_trgm
   if (results.length === 0) {
     const {data: similar} = await supabase.rpc('search_customers_fuzzy', {
-      search_term: clientName,
-      threshold: 0.2
+      search_term: clientName, threshold: 0.2
     });
     results = similar || [];
   }
-
   if (!results.length) return [];
-
-  // סנן לפי עיר אם יש
   if (cityName && cityName.length > 1) {
-    const filtered = results.filter(c => 
+    const filtered = results.filter(c =>
       c.city?.includes(cityName) || c.site_name?.includes(cityName)
     );
     if (filtered.length > 0) return filtered.slice(0,8);
   }
-
   return results.slice(0,8);
 }
 
 async function getCustomerMachines(siteName, cityName='') {
-  // קודם מצא את הלקוח המדויק
   const {data: exact} = await supabase.from('customers').select('*').eq('site_name', siteName).eq('is_active',true).limit(1);
-  
   if (exact && exact.length > 0 && exact[0].customer_id) {
-    // מצא כל המכונות עם אותו customer_id
     let query = supabase.from('customers').select('*').eq('customer_id', exact[0].customer_id).eq('is_active',true);
-    
-    // אם יש עיר — סנן לפיה
-    if (cityName && cityName.length > 1) {
-      query = query.ilike('city', '%'+cityName+'%');
-    }
-    
+    if (cityName && cityName.length > 1) query = query.ilike('city', '%'+cityName+'%');
     const {data} = await query.limit(15);
     if (data && data.length > 0) return data;
-    
-    // אם לא נמצא עם עיר — החזר את המכונה המקורית בלבד
     return exact;
   }
-  
   return exact || [];
 }
 
@@ -176,59 +156,46 @@ async function closeTicket(ticketId, actions, parts) {
   return data;
 }
 
-// ===== FORMATTERS =====
-function fmtHistory(hist) {
-  if (!hist.length) return '';
-  return '\n📜 היסטוריה אחרונה:\n' + hist.map(h =>
-    `🔧 ${(h.closed_at||'?').slice(0,10)} — ${h.actions ? h.actions.join(' + ') : 'לא מצוין'}`
-  ).join('\n');
+// ===== INVENTORY =====
+const PART_TO_INVENTORY = {
+  'ברז חשמלי': 'ברז',
+  'נשם': 'נשם חלב',
+  'קפוצינטור': 'קפוצינטור',
+  'יחידת חליטה': 'יחידת חליטה',
+  'מקרר': 'מקרר',
+  'תבריג': 'תבריג',
+  'צינורית חלב': 'צינוריות לחלב',
+  'בילט': 'החלפת בילט'
+};
+
+async function deductInventory(partName) {
+  const searchName = PART_TO_INVENTORY[partName] || partName;
+  const {data: items} = await supabase.from('inventory').select('id, part_name, quantity')
+    .ilike('part_name', '%'+searchName+'%').limit(1);
+  if (!items || !items.length) return null;
+  const item = items[0];
+  const newQty = Math.max(0, (item.quantity || 0) - 1);
+  await supabase.from('inventory').update({ quantity: newQty, updated_at: new Date().toISOString() }).eq('id', item.id);
+  return { name: item.part_name, oldQty: item.quantity, newQty };
 }
 
-function fmtDate(iso) {
-  if (!iso) return '?';
-  const d = new Date(iso);
-  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-}
-
-function extractClientAndCity(msg) {
-  // הסר מילות תקלה
-  let t = msg;
-  FAULT_WORDS.forEach(w => { t = t.split(w).join(' '); });
-  t = t.replace(/[^\u05d0-\u05eaA-Za-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
-  
-  const words = t.split(/\s+/).filter(w => w.length > 1 && !STOP_WORDS.has(w));
-  if (!words.length) return {clientName:'', cityName:''};
-  
-  // המילה הראשונה = שם לקוח, המילה השנייה = עיר
-  const clientName = words[0];
-  const cityName = words.length > 1 ? words[1] : '';
-  return {clientName, cityName};
-}
-
-// ===== MAIN HANDLER =====
-// ===== שליחת WhatsApp ישירה =====
+// ===== WHATSAPP =====
 async function sendWhatsApp(toPhone, message) {
   try {
-    // נקה ופרמט מספר — תמיד +972XXXXXXXXX
     let num = String(toPhone).replace(/\D/g,'');
     if (num.startsWith('0')) num = '972' + num.slice(1);
     if (!num.startsWith('972')) num = '972' + num;
     const to = '+' + num;
     console.log('📤 שולח ל:', to);
-    await twilioClient.messages.create({
-      from: 'whatsapp:+972584820015',
-      to: `whatsapp:${to}`,
-      body: message
-    });
+    await twilioClient.messages.create({ from: TWILIO_NUMBER, to: `whatsapp:${to}`, body: message });
     console.log('✅ נשלח ל', to);
   } catch(e) {
     console.error('❌ שגיאה בשליחה:', toPhone, e.message);
   }
 }
 
-// ===== זיהוי משתמשים לפי טלפון =====
+// ===== USER ROLES =====
 function getUserRole(phone) {
-  // phone comes as "972505771762" (already without + from whatsapp: strip)
   const num = phone.replace(/^\+/,'').replace(/^0/,'972');
   console.log('getUserRole:', phone, '->', num, '| ORI:', process.env.PHONE_ORI, '| ODED:', process.env.PHONE_ODED);
   const roles = {
@@ -245,6 +212,15 @@ function getUserRole(phone) {
   return roles[num] || { name: null, role: 'unknown' };
 }
 
+const techPhones = {
+  'אבשלום': process.env.PHONE_AVSHALOM,
+  'בניה':   process.env.PHONE_BENIA,
+  'שקד':    process.env.PHONE_SHAKED,
+  'אלכס':   process.env.PHONE_ALEX,
+  'גבי':    process.env.PHONE_GABI,
+};
+
+// ===== MAIN HANDLER =====
 async function handleMessage(from, body) {
   const phone = from.replace('whatsapp:','');
   const msg = body.trim();
@@ -255,48 +231,60 @@ async function handleMessage(from, body) {
   s.userName = user.name;
   s.userRole = user.role;
 
+  // ===== מה פתוח =====
+  if (msg === 'מה פתוח') {
+    return await handleWhatOpen(s, user);
+  }
+
+  // ===== שייך [מספר] =====
+  if (msg.startsWith('שייך ') && (user.role === 'manager' || user.role === 'agent')) {
+    const idx = parseInt(msg.replace('שייך','').trim()) - 1;
+    if (!isNaN(idx) && s.openList && idx >= 0 && idx < s.openList.length) {
+      const ticket = s.openList[idx];
+      s.assigningTicket = ticket;
+      const techs = await getTechnicians();
+      s.techs = techs;
+      s.step = 'assign_existing_ticket';
+      return `בחר טכנאי ל${ticket.customers?.site_name}:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+    }
+    return 'כתוב: שייך [מספר] לפי הרשימה';
+  }
+
   // ===== IDLE =====
   if (s.step === 'idle') {
 
-    // סגירה: "סיימתי [לקוח] [פעולה]"
+    // סגירה: "סיימתי [לקוח]"
     if (msg.startsWith('סיימתי')) {
       const rest = msg.replace('סיימתי','').trim();
       const words = rest.split(/\s+/);
       const clientWord = words[0] || '';
 
       const {data: openTickets} = await supabase.from('tickets')
-        .select('*,customers(site_name,site_code,machine_type,location)')
+        .select('*,customers(site_name,site_code,machine_type,location,city)')
         .eq('status','open').order('opened_at',{ascending:false});
 
-      const matched = (openTickets||[]).filter(t =>
-        t.customers?.site_name?.includes(clientWord)
-      );
+      // סנן לפי טכנאי אם לא מנהל
+      let myTickets = openTickets || [];
+      if (user.role === 'technician' || user.role === 'lab') {
+        const {data: tech} = await supabase.from('technicians').select('id').eq('name', user.name).single();
+        if (tech) myTickets = myTickets.filter(t => t.technician_id === tech.id);
+      }
 
+      const matched = myTickets.filter(t => t.customers?.site_name?.includes(clientWord));
       if (!matched.length) return `לא מצאתי תקלה פתוחה עבור "${clientWord}"`;
-
-      // זיהוי פעולה מהטקסט
-      const restText = words.slice(1).join(' ');
-      let detectedAction = null;
-      if (restText.includes('אבנית')) detectedAction = 'טיפול אבנית';
-      else if (restText.includes('קצפ') || restText.includes('הקצפה')) detectedAction = 'ניקיון מערכת הקצפה';
-      else if (restText.includes('כדורית')) detectedAction = 'טיפול כדורית — יחידת חליטה';
-      else if (restText.includes('מכונה')) detectedAction = 'החלפת מכונה';
-      else if (restText.includes('נשם')) { detectedAction = 'החלפת חלק'; s.closingPart = 'נשם'; }
-      else if (restText.includes('ברז')) { detectedAction = 'החלפת חלק'; s.closingPart = 'ברז חשמלי'; }
-      else if (restText.includes('קפוצינטור')) { detectedAction = 'החלפת חלק'; s.closingPart = 'קפוצינטור'; }
 
       if (matched.length === 1) {
         s.ticketId = matched[0].id;
         s.siteCode = matched[0].customers?.site_code;
         s.closingMachine = matched[0].customers?.location || matched[0].customers?.machine_type;
         s.closingSiteName = matched[0].customers?.site_name;
-        s.actions = detectedAction ? [detectedAction] : [];
-        s.parts = s.closingPart ? [s.closingPart] : [];
-        s.step = 'closing_more';
-        return MORE_MENU;
+        s.openedAt = matched[0].opened_at;
+        s.actions = [];
+        s.parts = [];
+        s.step = 'closing_action';
+        return ACTION_MENU;
       }
 
-      // כמה תקלות פתוחות — תן לבחור
       s.step = 'select_close_ticket';
       s.openTickets = matched;
       return 'איזו תקלה לסגור?\n' + matched.map((t,i) =>
@@ -304,159 +292,67 @@ async function handleMessage(from, body) {
       ).join('\n');
     }
 
-    // פתיחת תקלה — פורמט: [שם לקוח] [עיר] תקלה [תיאור]
+    // פתיחת תקלה
     const isFault = FAULT_WORDS.some(w => msg.includes(w));
     if (isFault) {
-      // זהה עיר מרשימת הערים
       const cityName = extractCityFromMsg(msg);
-      
-      // הסר עיר ומילות תקלה — מה שנשאר = שם לקוח
       let clientText = msg;
       if (cityName) clientText = clientText.split(cityName).join(' ');
       FAULT_WORDS.forEach(w => { clientText = clientText.split(w).join(' '); });
       ['לא','של','את','עם','על','בלי','רק'].forEach(w => { clientText = clientText.split(' '+w+' ').join(' '); });
       clientText = clientText.replace(/[^\u05d0-\u05eaA-Za-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
       const clientName = clientText;
-      
       if (clientName.length < 2) return 'מה שם הלקוח?';
-      
+
       let customers = await searchCustomers(clientName, cityName);
       if (!customers.length) return `לא מצאתי לקוח בשם "${clientName}"${cityName?' ב'+cityName:''} — בדוק את השם ונסה שוב.`;
 
       s.faultDesc = msg;
-      s.cityName = cityName; // שמור עיר לסינון מכונות
-
-      // עדכון קבוצה
-      const groupUpdate = `✅ תקלה נרשמה — ${customers[0].site_name}`;
+      s.cityName = cityName;
 
       if (customers.length === 1) {
-        return await handleOneCustomer(s, customers[0], phone, groupUpdate);
+        // אישור לקוח לשולח
+        s.step = 'confirm_customer';
+        s.customers = customers;
+        const c = customers[0];
+        return `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}\n\nזה הלקוח? 1️⃣ כן | 2️⃣ לא`;
       }
 
       s.step = 'select_customer';
       s.customers = customers;
-      s.groupUpdate = groupUpdate;
       return `מצאתי כמה תוצאות:\n` +
         customers.map((c,i) => `${i+1}️⃣ ${c.site_name} — ${c.city}${c.location?' | '+c.location:''}`).join('\n');
     }
 
-
-  // ===== מעבדה — אלכס =====
-  if (msg === 'מתחיל עבודה' || msg.startsWith('מתחיל עבודה')) {
-    s.step = 'lab_select_machine';
-    return 'איזו מכונה?\n1️⃣ M12\n2️⃣ F16\n3️⃣ F15';
-  }
-
-    // סיכום יומי
-    if (msg === 'סיכום יומי') {
-      const techs = await getTechnicians();
-      const {data: openAll} = await supabase.from('tickets')
-        .select('*,customers(site_name,machine_type)')
-        .eq('status','open').order('opened_at',{ascending:false});
-
-      let summary = `📋 סיכום יומי — ${new Date().toLocaleDateString('he-IL')}\n\n`;
-      for (const tech of techs) {
-        const myTickets = (openAll||[]).filter(t => t.technician_id === tech.id);
-        if (!myTickets.length) continue;
-        summary += `*${tech.name}* — ${myTickets.length} פתוחות\n`;
-        myTickets.forEach(t => {
-          summary += `• ${t.customers?.site_name||'?'} | ${t.description||'?'} | ${t.customers?.machine_type||''}\n`;
-          summary += `  ⏰ פתוח מ-${fmtDate(t.opened_at)}\n`;
-        });
-        summary += '\n';
-      }
-      summary += 'לשלוח לכולם? 1️⃣ כן | 2️⃣ עריכה';
-      s.step = 'daily_summary_confirm';
-      s.summaryTechs = techs;
-      s.summaryTickets = openAll;
-      return summary;
+    // מעבדה — אלכס
+    if (msg === 'מתחיל עבודה' || msg.startsWith('מתחיל עבודה')) {
+      s.step = 'lab_select_machine';
+      return 'איזו מכונה?\n1️⃣ M12\n2️⃣ F16\n3️⃣ F15';
     }
 
     return null;
   }
 
-  // ===== שיוך טכנאי לאיסוף =====
-  if (s.step === 'collection_assign') {
-    const idx = parseInt(msg) - 1;
-    if (idx >= 0 && idx < (s.techs||[]).length) {
-      const tech = s.techs[idx];
-      const note = s.pendingCollection;
-      const machines = s.collectionMachines || [];
-      const qty = note.machine_quantity || 1;
-
-      // הודעה לטכנאי
-      let machineInfo = machines.length > 0
-        ? '\n🔧 מכונות:\n' + machines.map((m,i) => `${i+1}️⃣ ${m.location||'לא מצוין'} | ${m.machine_type}`).join('\n')
-        : '';
-      
-      const techMsg = `🔄 משימת איסוף!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address}\n🔧 לאסוף ${qty} מכונות${machineInfo}\n👤 ${note.contact_name||''} ${note.contact_phone||''}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: נאסף`;
-
-      // אם יש כמה מכונות — צריך לדעת איזו/אילו
-      if (machines.length > qty) {
-        s.step = 'collection_select_machines';
-        s.collectionTech = tech;
-        s.collectionQty = qty;
-        const list = machines.map((m,i) => `${i+1}️⃣ ${m.location||'לא מצוין'} | ${m.machine_type} | ${m.city}`).join('\n');
-        return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}\n\nיש ${machines.length} מכונות — אילו ${qty} נאספות?\n${list}\n\nבחר ${qty} מספרים (לדוגמה: 1,3)`;
-      }
-
-      // מכונה אחת או כל המכונות
-      s.step = 'collection_confirm';
-      s.collectionTech = tech;
-      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
+  // ===== אישור לקוח =====
+  if (s.step === 'confirm_customer') {
+    if (msg === '1') {
+      return await handleOneCustomer(s, s.customers[0], phone);
     }
-    return 'בחר מספר מהרשימה';
-  }
-
-  // ===== בחירת מכונות לאיסוף =====
-  if (s.step === 'collection_select_machines') {
-    const selected = msg.split(',').map(n => parseInt(n.trim()) - 1).filter(i => i >= 0 && i < (s.collectionMachines||[]).length);
-    if (selected.length === 0) return 'בחר מספרים מהרשימה (לדוגמה: 1,3)';
-    s.selectedCollectionMachines = selected.map(i => s.collectionMachines[i]);
-    s.step = 'collection_confirm';
-    const list = s.selectedCollectionMachines.map(m => `• ${m.location||'לא מצוין'} | ${m.machine_type}`).join('\n');
-    return `✅ מכונות שנאספות:\n${list}\n\nממתין לאישור טכנאי (נאסף + תעודה)`;
-  }
-
-  // ===== שיוך טכנאי להתקנה =====
-  if (s.step === 'installation_assign') {
-    const idx = parseInt(msg) - 1;
-    if (idx >= 0 && idx < (s.techs||[]).length) {
-      const tech = s.techs[idx];
-      const note = s.pendingNote;
-
-      // שמור התקנה במסד
-      const {data: inst} = await supabase.from('installations').insert({
-        site_code: null,
-        delivery_note_number: note.delivery_note_number,
-        machine_type: note.machine_type,
-        location: note.address,
-        technician_id: tech.id,
-        notes: JSON.stringify(note)
-      }).select().single();
-
-      s.installationId = inst?.id;
+    if (msg === '2') {
       s.step = 'idle';
-
-      // הודעה לטכנאי
-      const techMsg = `📦 משימת התקנה חדשה!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address}\n🔧 ${note.machine_type}\n👤 ${note.contact_name} — ${note.contact_phone}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: הותקן`;
-
-      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
+      return 'בסדר, נסה שוב עם שם אחר';
     }
-    return 'בחר מספר מהרשימה';
-  }
-
-  // ===== סגירת התקנה =====
-  if (msg === 'הותקן') {
-    s.step = 'installation_confirm';
-    return 'שלח צילום של התעודה החתומה 📸';
+    return `זה הלקוח? 1️⃣ כן | 2️⃣ לא`;
   }
 
   // ===== בחירת לקוח =====
   if (s.step === 'select_customer') {
     const idx = parseInt(msg) - 1;
     if (idx >= 0 && idx < (s.customers||[]).length) {
-      return await handleOneCustomer(s, s.customers[idx], phone, s.groupUpdate);
+      const c = s.customers[idx];
+      s.step = 'confirm_customer';
+      s.customers = [c];
+      return `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}\n\nזה הלקוח? 1️⃣ כן | 2️⃣ לא`;
     }
     return 'בחר מספר מהרשימה';
   }
@@ -465,57 +361,53 @@ async function handleMessage(from, body) {
   if (s.step === 'select_machine') {
     const idx = parseInt(msg) - 1;
     if (idx >= 0 && idx < (s.machines||[]).length) {
-      const machine = s.machines[idx];
-      return await buildShiuach(s, machine, phone);
+      return await buildShiuach(s, s.machines[idx], phone);
     }
     return 'בחר מספר מהרשימה';
   }
 
-  // ===== שיוך טכנאי (אורי בוחר) =====
-  // step assign_tech_pick is handled below
-
-  // ===== סגירת איסוף — טכנאי שולח "נאסף" לפתיחת תהליך =====
-  if ((msg === 'נאסף' || msg.startsWith('נאסף ')) && s.step !== 'collection_photo' && s.step !== 'collection_which_machine') {
-    const clientWord = msg.replace('נאסף','').trim();
-    
-    // אם יש מכונות בסשן — השתמש בהן
-    let machines = s.collectionMachines || [];
-    
-    // אם אין בסשן או כתב שם לקוח — חפש במסד
-    if (machines.length === 0 && clientWord.length > 1) {
-      const {data} = await supabase.from('customers')
-        .select('site_code, site_name, city, location, machine_type')
-        .ilike('site_name', '%'+clientWord+'%')
-        .eq('is_active', true)
-        .limit(10);
-      machines = data || [];
-      s.collectionMachines = machines;
-    }
-    
-    if (machines.length === 0) {
-      return 'לא מצאתי מכונות — כתוב: נאסף [שם לקוח]';
-    }
-    
-    if (machines.length === 1) {
-      return await doCollectMachine(s, machines[0]);
-    }
-    
-    // כמה מכונות — בחר איזו
-    s.step = 'collection_which_machine';
-    const list = machines.map((m,i) => `${i+1}️⃣ ${m.site_name}${m.location?' | '+m.location:''} | ${m.machine_type} | ${m.city}`).join('\n');
-    return `איזו מכונה נאספה?\n${list}`;
-  }
-
-  if (s.step === 'collection_which_machine') {
+  // ===== שיוך טכנאי לתקלה קיימת =====
+  if (s.step === 'assign_existing_ticket') {
     const idx = parseInt(msg) - 1;
-    const machines = s.collectionMachines || [];
-    if (idx >= 0 && idx < machines.length) {
-      return await doCollectMachine(s, machines[idx]);
+    if (idx >= 0 && idx < (s.techs||[]).length) {
+      const tech = s.techs[idx];
+      const ticket = s.assigningTicket;
+      await assignTechnician(ticket.id, tech.name);
+
+      // הודעה לטכנאי
+      const machine = ticket.customers;
+      const hist = await getHistory(machine?.site_code);
+      const recent = await countRecent(machine?.site_code);
+      let techMsg = `📋 קריאה חדשה!\n📍 ${machine?.site_name}`;
+      if (machine?.address) techMsg += `\n📬 ${machine.address}`;
+      if (machine?.city) techMsg += `, ${machine.city}`;
+      if (machine?.location) techMsg += `\n🏢 ${machine.location}`;
+      techMsg += `\n🔧 ${machine?.machine_type}`;
+      techMsg += `\n⚠️ ${ticket.description}`;
+      if (machine?.contact_name) techMsg += `\n👤 ${machine.contact_name}`;
+      if (machine?.contact_phone) techMsg += ` — ${machine.contact_phone}`;
+      if (hist && hist.length > 0) {
+        techMsg += `\n\n📜 תקלות אחרונות:`;
+        hist.slice(0,2).forEach(h => {
+          techMsg += `\n🔧 ${(h.closed_at||'').slice(0,10)} — ${h.actions?.join(' + ') || 'לא מצוין'}`;
+        });
+      }
+      if (recent >= 3) techMsg += `\n⚠️ ${recent} תקלות ב-60 יום`;
+      techMsg += `\n\nכשתסיים — כתוב: סיימתי ${machine?.site_name?.split(' ')[0]}`;
+
+      // לקבוצה
+      const groupMsg = `🔧 תקלה חדשה\n📍 ${machine?.site_name}${machine?.location?' | '+machine.location:''}\n🔧 ${machine?.machine_type}\n⚠️ ${ticket.description}\n👨‍🔧 שויך ל${tech.name}`;
+
+      const techPhone = techPhones[tech.name];
+      if (techPhone) await sendWhatsApp(techPhone, techMsg);
+
+      s.step = 'idle';
+      return `✅ שויך ל${tech.name}\n\n${groupMsg}`;
     }
     return 'בחר מספר מהרשימה';
   }
 
-  // ===== בחירת טכנאי ידנית =====
+  // ===== שיוך טכנאי =====
   if (s.step === 'assign_tech_pick') {
     const idx = parseInt(msg) - 1;
     if (idx >= 0 && idx < (s.techs||[]).length) {
@@ -533,18 +425,23 @@ async function handleMessage(from, body) {
       s.siteCode = t.customers?.site_code;
       s.closingMachine = t.customers?.location || t.customers?.machine_type;
       s.closingSiteName = t.customers?.site_name;
+      s.openedAt = t.opened_at;
       s.actions = [];
       s.parts = [];
-      s.step = 'closing_more';
-      return MORE_MENU;
+      s.step = 'closing_action';
+      return ACTION_MENU;
     }
     return 'בחר מספר מהרשימה';
   }
 
-  // ===== פעולת סגירה ראשונה =====
+  // ===== פעולת סגירה =====
   if (s.step === 'closing_action') {
     if (ACTIONS[msg]) {
-      if (msg === '4') { s.step = 'closing_part'; return PART_MENU; }
+      if (msg === '5') { s.step = 'closing_part'; return PART_MENU; }
+      if (msg === '6') {
+        s.step = 'closing_action_other';
+        return 'מה עשית? (ציין ידנית)';
+      }
       s.actions = [ACTIONS[msg]];
       s.step = 'closing_more';
       return MORE_MENU;
@@ -552,29 +449,45 @@ async function handleMessage(from, body) {
     return ACTION_MENU;
   }
 
+  // ===== פעולה ידנית =====
+  if (s.step === 'closing_action_other') {
+    s.actions = [msg];
+    s.step = 'closing_more';
+    return MORE_MENU;
+  }
+
   // ===== בחירת חלק =====
   if (s.step === 'closing_part') {
     if (PARTS[msg]) {
+      const partName = msg === '9' ? null : PARTS[msg];
+      if (msg === '9') {
+        s.step = 'closing_part_other';
+        return 'איזה חלק? (ציין ידנית)';
+      }
       s.actions.push('החלפת חלק');
-      s.parts.push(PARTS[msg]);
+      s.parts.push(partName);
       s.step = 'closing_more';
       return MORE_MENU;
     }
     return PART_MENU;
   }
 
-  // ===== עוד פעולה? =====
-  if (s.step === 'closing_more') {
-    if (msg === '6') {
-      return await doCloseTicket(s);
-    }
-    if (msg === '4') { s.step = 'closing_part'; return PART_MENU; }
-    if (ACTIONS[msg] && !s.actions.includes(ACTIONS[msg])) {
-      s.actions.push(ACTIONS[msg]);
-    }
+  // ===== חלק ידני =====
+  if (s.step === 'closing_part_other') {
+    s.actions.push('החלפת חלק');
+    s.parts.push(msg);
+    s.step = 'closing_more';
     return MORE_MENU;
   }
 
+  // ===== עוד פעולה? =====
+  if (s.step === 'closing_more') {
+    if (msg === '7') return await doCloseTicket(s);
+    if (msg === '5') { s.step = 'closing_part'; return PART_MENU; }
+    if (msg === '6') { s.step = 'closing_action_other'; return 'מה עשית? (ציין ידנית)'; }
+    if (ACTIONS[msg] && !s.actions.includes(ACTIONS[msg])) s.actions.push(ACTIONS[msg]);
+    return MORE_MENU;
+  }
 
   // ===== מעבדה — בחירת מכונה =====
   if (s.step === 'lab_select_machine') {
@@ -583,12 +496,9 @@ async function handleMessage(from, body) {
       s.labMachine = machines[msg];
       s.labStart = new Date().toISOString();
       s.step = 'lab_working';
-      const timeStr = new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-      // שמור ב-DB
+      const timeStr = fmtTime(s.labStart);
       supabase.from('lab_jobs').insert({
-        machine_type: s.labMachine,
-        started_at: s.labStart,
-        technician_id: null
+        machine_type: s.labMachine, started_at: s.labStart, technician_id: null
       }).then(() => {});
       return `🔧 כרטיס עבודה נפתח\n⏰ התחלה: ${timeStr}\nמכונה: ${s.labMachine}\n\nכשתסיים — כתוב: סיימתי`;
     }
@@ -609,7 +519,8 @@ async function handleMessage(from, body) {
   // ===== מעבדה — פעולה =====
   if (s.step === 'lab_action') {
     if (ACTIONS[msg]) {
-      if (msg === '4') { s.step = 'lab_part'; return PART_MENU; }
+      if (msg === '5') { s.step = 'lab_part'; return PART_MENU; }
+      if (msg === '6') { s.step = 'lab_action_other'; return 'מה עשית? (ציין ידנית)'; }
       s.actions = [ACTIONS[msg]];
       s.step = 'lab_more';
       return MORE_MENU;
@@ -617,9 +528,16 @@ async function handleMessage(from, body) {
     return ACTION_MENU;
   }
 
+  if (s.step === 'lab_action_other') {
+    s.actions = [msg];
+    s.step = 'lab_more';
+    return MORE_MENU;
+  }
+
   // ===== מעבדה — חלק =====
   if (s.step === 'lab_part') {
     if (PARTS[msg]) {
+      if (msg === '9') { s.step = 'lab_part_other'; return 'איזה חלק? (ציין ידנית)'; }
       s.actions.push('החלפת חלק');
       s.parts.push(PARTS[msg]);
       s.step = 'lab_more';
@@ -628,51 +546,277 @@ async function handleMessage(from, body) {
     return PART_MENU;
   }
 
+  if (s.step === 'lab_part_other') {
+    s.actions.push('החלפת חלק');
+    s.parts.push(msg);
+    s.step = 'lab_more';
+    return MORE_MENU;
+  }
+
   // ===== מעבדה — עוד פעולה =====
   if (s.step === 'lab_more') {
-    if (msg === '6') {
-      // סגור עבודת מעבדה
+    if (msg === '7') {
       const endTime = new Date().toISOString();
       const actText = s.actions.join(' + ');
-      const partsText = s.parts?.length ? ` | חלקים: ${s.parts.join(', ')}` : '';
+      const partsText = s.parts?.length ? s.parts.join(', ') : '—';
       await supabase.from('lab_jobs').update({
-        completed_at: endTime,
-        actions: s.actions,
-        parts: s.parts
+        completed_at: endTime, actions: s.actions, parts: s.parts
       }).eq('machine_type', s.labMachine).is('completed_at', null);
-      // עדכן מלאי
       if (s.parts && s.parts.length > 0) {
-        for (const part of s.parts) {
-          await deductInventory(part);
-        }
+        for (const part of s.parts) await deductInventory(part);
       }
-      
       s.step = 'idle';
-      return `✅ עבודת מעבדה הושלמה\n🔧 ${s.labMachine} | ${actText}${partsText}`;
+      return `✅ עבודת מעבדה הושלמה\n🔧 ${s.labMachine} | ${actText}\nחלקים: ${partsText}\n⏰ ${fmtTime(s.labStart)} — ${fmtTime(endTime)}`;
     }
-    if (msg === '4') { s.step = 'lab_part'; return PART_MENU; }
+    if (msg === '5') { s.step = 'lab_part'; return PART_MENU; }
+    if (msg === '6') { s.step = 'lab_action_other'; return 'מה עשית? (ציין ידנית)'; }
     if (ACTIONS[msg] && !s.actions.includes(ACTIONS[msg])) s.actions.push(ACTIONS[msg]);
     return MORE_MENU;
   }
 
-  // ===== אישור סיכום יומי =====
-  if (s.step === 'daily_summary_confirm') {
-    if (msg === '1') {
-      s.step = 'idle';
-      return '✅ סיכום יומי נשלח לכל הטכנאים';
+  // ===== שיוך טכנאי לאיסוף =====
+  if (s.step === 'collection_assign') {
+    const idx = parseInt(msg) - 1;
+    if (idx >= 0 && idx < (s.techs||[]).length) {
+      const tech = s.techs[idx];
+      const note = s.pendingCollection;
+      const machines = s.collectionMachines || [];
+      const qty = note.machine_quantity || 1;
+
+      let machineInfo = machines.length > 0
+        ? '\n🔧 מכונות:\n' + machines.map((m,i) => {
+            const letter = String.fromCharCode(0x05D0 + i); // א, ב, ג...
+            return `${letter}) ${m.location||'לא מצוין'} | ${m.machine_type}`;
+          }).join('\n')
+        : '';
+
+      const techMsg = `🔄 משימת איסוף!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address||''}\n🔧 לאסוף ${qty} מכונות${machineInfo}\n👤 ${note.contact_name||''} ${note.contact_phone||''}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: נאסף`;
+
+      if (machines.length > qty) {
+        s.step = 'collection_select_machines';
+        s.collectionTech = tech;
+        s.collectionQty = qty;
+        const list = machines.map((m,i) => {
+          const letter = String.fromCharCode(0x05D0 + i);
+          return `${letter}) ${m.location||'לא מצוין'} | ${m.machine_type} | ${m.city}`;
+        }).join('\n');
+        return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}\n\nיש ${machines.length} מכונות — אילו ${qty} נאספות?\n${list}\n\nבחר באותיות (לדוגמה: א,ג)`;
+      }
+
+      s.step = 'collection_confirm';
+      s.collectionTech = tech;
+
+      const techPhone = techPhones[tech.name];
+      if (techPhone) await sendWhatsApp(techPhone, techMsg);
+
+      return `✅ שויך ל${tech.name}\n\n[הודעה ל${tech.name}]\n${techMsg}`;
     }
-    return 'עריכת סיכום יומי — בקרוב';
+    return 'בחר מספר מהרשימה';
+  }
+
+  // ===== בחירת מכונות לאיסוף =====
+  if (s.step === 'collection_select_machines') {
+    const letters = msg.split(',').map(l => l.trim());
+    const machines = s.collectionMachines || [];
+    const selected = letters.map(l => {
+      const idx = l.charCodeAt(0) - 0x05D0;
+      return machines[idx];
+    }).filter(Boolean);
+    if (selected.length === 0) return 'בחר אותיות מהרשימה (לדוגמה: א,ג)';
+    s.selectedCollectionMachines = selected;
+    s.step = 'collection_confirm';
+    const list = selected.map(m => `• ${m.location||'לא מצוין'} | ${m.machine_type}`).join('\n');
+
+    const techPhone = techPhones[s.collectionTech?.name];
+    const note = s.pendingCollection;
+    const techMsg = `🔄 משימת איסוף!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address||''}\n🔧 מכונות לאיסוף:\n${list}\n👤 ${note.contact_name||''} ${note.contact_phone||''}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: נאסף`;
+    if (techPhone) await sendWhatsApp(techPhone, techMsg);
+
+    return `✅ מכונות שנאספות:\n${list}\n\nממתין לאישור טכנאי (נאסף + תעודה)`;
+  }
+
+  // ===== שיוך טכנאי להתקנה =====
+  if (s.step === 'installation_assign') {
+    const idx = parseInt(msg) - 1;
+    if (idx >= 0 && idx < (s.techs||[]).length) {
+      const tech = s.techs[idx];
+      const note = s.pendingNote;
+      const qty = note.machine_quantity || 1;
+
+      const {data: inst} = await supabase.from('installations').insert({
+        site_code: null,
+        delivery_note_number: note.delivery_note_number,
+        machine_type: note.machine_type,
+        location: note.address,
+        technician_id: tech.id,
+        notes: JSON.stringify(note)
+      }).select().single();
+
+      s.installationId = inst?.id;
+      s.installationQty = qty;
+      s.installationTech = tech;
+      s.pendingCustomer = note;
+      s.step = 'idle';
+
+      const qtyText = qty > 1 ? ` | ${qty} מכונות` : '';
+      const techMsg = `📦 משימת התקנה חדשה!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address}\n🔧 ${note.machine_type}${qtyText}\n👤 ${note.contact_name} — ${note.contact_phone}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: הותקן`;
+
+      // לקבוצת התקנות
+      const groupMsg = `📦 התקנה חדשה נפתחה\n📍 ${note.client_name} | ${note.city}\n🔧 ${note.machine_type}${qtyText}\n👨‍🔧 שויך ל${tech.name}`;
+
+      const techPhone = techPhones[tech.name];
+      if (techPhone) await sendWhatsApp(techPhone, techMsg);
+
+      return `✅ שויך ל${tech.name}\n\n${groupMsg}`;
+    }
+    return 'בחר מספר מהרשימה';
+  }
+
+  // ===== סגירת התקנה — מיקומים =====
+  if (s.step === 'installation_location') {
+    const qty = s.installationQty || 1;
+    s.installationLocations = s.installationLocations || [];
+    s.installationLocations.push(msg);
+
+    if (s.installationLocations.length < qty) {
+      return `מכונה ${s.installationLocations.length + 1} — איפה?`;
+    }
+
+    // כל המיקומים התקבלו — עדכן מסד
+    const locations = s.installationLocations;
+    await supabase.from('installations').update({
+      signed_note_url: s.installationPhotoUrl,
+      completed_at: new Date().toISOString(),
+      notes: JSON.stringify({...s.pendingCustomer, locations})
+    }).eq('id', s.installationId);
+
+    // הוסף לקוחות עם מיקומים
+    for (let i = 0; i < locations.length; i++) {
+      await supabase.from('customers').insert({
+        site_code: 'NEW-' + Date.now() + '-' + i,
+        site_name: s.pendingCustomer?.client_name,
+        city: s.pendingCustomer?.city,
+        address: s.pendingCustomer?.address,
+        contact_name: s.pendingCustomer?.contact_name,
+        contact_phone: s.pendingCustomer?.contact_phone,
+        machine_type: s.pendingCustomer?.machine_type,
+        location: locations[i],
+        is_active: true
+      });
+    }
+
+    const locationList = locations.map((l,i) => `📌 מכונה ${i+1} — ${l}`).join('\n');
+    const groupMsg = `✅ התקנה הושלמה\n📍 ${s.pendingCustomer?.client_name} | ${s.pendingCustomer?.city}\n🔧 ${s.pendingCustomer?.machine_type} | כמות: ${qty}\n${locationList}\n👨‍🔧 ${s.installationTech?.name}`;
+
+    s.step = 'idle';
+    return groupMsg;
+  }
+
+  // ===== נאסף =====
+  if ((msg === 'נאסף' || msg.startsWith('נאסף ')) && s.step !== 'collection_photo' && s.step !== 'collection_which_machine') {
+    const clientWord = msg.replace('נאסף','').trim();
+    let machines = s.collectionMachines || [];
+    if (machines.length === 0 && clientWord.length > 1) {
+      const {data} = await supabase.from('customers')
+        .select('site_code, site_name, city, location, machine_type')
+        .ilike('site_name', '%'+clientWord+'%').eq('is_active', true).limit(10);
+      machines = data || [];
+      s.collectionMachines = machines;
+    }
+    if (machines.length === 0) return 'לא מצאתי מכונות — כתוב: נאסף [שם לקוח]';
+    if (machines.length === 1) return await doCollectMachine(s, machines[0]);
+    s.step = 'collection_which_machine';
+    const list = machines.map((m,i) => {
+      const letter = String.fromCharCode(0x05D0 + i);
+      return `${letter}) ${m.site_name}${m.location?' | '+m.location:''} | ${m.machine_type} | ${m.city}`;
+    }).join('\n');
+    return `איזו מכונה נאספה?\n${list}`;
+  }
+
+  if (s.step === 'collection_which_machine') {
+    const machines = s.collectionMachines || [];
+    const letter = msg.trim();
+    const idx = letter.charCodeAt(0) - 0x05D0;
+    if (idx >= 0 && idx < machines.length) {
+      return await doCollectMachine(s, machines[idx]);
+    }
+    return 'בחר אות מהרשימה';
+  }
+
+  // ===== הותקן =====
+  if (msg === 'הותקן') {
+    s.step = 'installation_confirm';
+    return 'שלח צילום של התעודה החתומה 📸';
   }
 
   return null;
 }
 
+// ===== מה פתוח =====
+async function handleWhatOpen(s, user) {
+  const isManager = user.role === 'manager' || user.role === 'agent';
+
+  // תקלות
+  let ticketQuery = supabase.from('tickets')
+    .select('*,customers(site_name,machine_type,location,city)')
+    .eq('status','open').order('opened_at',{ascending:false});
+
+  const {data: openTickets} = await ticketQuery;
+
+  // התקנות
+  const {data: openInstallations} = await supabase.from('installations')
+    .select('*').is('completed_at', null).order('created_at',{ascending:false});
+
+  let tickets = openTickets || [];
+  let installations = openInstallations || [];
+
+  if (!isManager) {
+    // סנן לפי טכנאי
+    const {data: tech} = await supabase.from('technicians').select('id').eq('name', user.name).single();
+    if (tech) {
+      tickets = tickets.filter(t => t.technician_id === tech.id);
+      installations = installations.filter(i => i.technician_id === tech.id);
+    }
+  }
+
+  let msg = `📋 מה פתוח — ${new Date().toLocaleDateString('he-IL')}\n\n`;
+
+  // תקלות
+  msg += `🔧 תקלות (${tickets.length}):\n`;
+  if (tickets.length === 0) {
+    msg += 'אין תקלות פתוחות\n';
+  } else {
+    tickets.forEach((t,i) => {
+      const techName = t.technician_name || 'לא משויך';
+      msg += `${i+1}. ${t.customers?.site_name||'?'} | ${t.customers?.machine_type||''} | ${t.description||''}\n`;
+      msg += `   👨‍🔧 ${techName} | ⏰ ${fmtTime(t.opened_at)}\n`;
+    });
+  }
+
+  // התקנות
+  msg += `\n📦 התקנות (${installations.length}):\n`;
+  if (installations.length === 0) {
+    msg += 'אין התקנות פתוחות\n';
+  } else {
+    installations.forEach((inst,i) => {
+      const note = inst.notes ? JSON.parse(inst.notes) : {};
+      msg += `${i+1}. ${note.client_name||'?'} | ${inst.machine_type||''}\n`;
+      msg += `   ⏰ ${fmtTime(inst.created_at)}\n`;
+    });
+  }
+
+  // שמור רשימה לשיוך
+  if (isManager) {
+    s.openList = tickets;
+    if (tickets.length > 0) msg += '\nלשיוך טכנאי — כתוב: שייך [מספר]';
+  }
+
+  return msg;
+}
+
 // ===== HELPERS =====
-
-async function handleOneCustomer(s, customer, phone, groupUpdate) {
-  // בדוק כמה מכונות לאותו לקוח — סנן לפי עיר אם יש
+async function handleOneCustomer(s, customer, phone) {
   const machines = await getCustomerMachines(customer.site_name, s.cityName || '');
-
   if (machines.length > 1) {
     s.step = 'select_machine';
     s.machines = machines;
@@ -680,21 +824,18 @@ async function handleOneCustomer(s, customer, phone, groupUpdate) {
     const list = machines.map((m,i) =>
       `${i+1}️⃣ ${m.city || ''} | ${m.location || 'לא מצוין'} | ${m.machine_type}`
     ).join('\n');
-    return `${groupUpdate}\n\n📲 פרטי אליך:\n` +
-      `יש ${machines.length} מכונות ב${customer.site_name} — איזו?\n${list}`;
+    return `יש ${machines.length} מכונות ב${customer.site_name} — איזו?\n${list}`;
   }
-
-  return await buildShiuach(s, customer, phone, groupUpdate);
+  return await buildShiuach(s, customer, phone);
 }
 
-async function buildShiuach(s, machine, phone, groupUpdate='') {
+async function buildShiuach(s, machine, phone) {
   s.selectedMachine = machine;
   const hist = await getHistory(machine.site_code);
   const recent = await countRecent(machine.site_code);
   const prevTech = await getPrevTech(machine.site_code);
   const techs = await getTechnicians();
 
-  // פתח תקלה
   const ticket = await openTicket(machine.site_code, machine.location, s.faultDesc, s.userName || phone);
   s.ticket = ticket;
   s.techs = techs;
@@ -709,27 +850,36 @@ async function buildShiuach(s, machine, phone, groupUpdate='') {
   oriMsg += `\n⚠️ ${s.faultDesc}`;
   if (machine.contact_name) oriMsg += `\n👤 ${machine.contact_name}`;
   if (machine.contact_phone) oriMsg += ` — ${machine.contact_phone}`;
-  // 2 תקלות אחרונות עם תאריכים
   if (hist && hist.length > 0) {
     oriMsg += `\n\n📜 תקלות אחרונות:`;
     hist.slice(0,2).forEach(h => {
-      const date = (h.closed_at||'').slice(0,10);
-      const acts = h.actions?.join(' + ') || 'לא מצוין';
-      oriMsg += `\n🔧 ${date} — ${acts}`;
+      oriMsg += `\n🔧 ${(h.closed_at||'').slice(0,10)} — ${h.actions?.join(' + ') || 'לא מצוין'}`;
     });
   }
   if (recent >= 3) oriMsg += `\n⚠️ ${recent} תקלות ב-60 יום האחרונים`;
   oriMsg += `\n\n🔧 טיפל בעבר: ${prevTech || 'לא ידוע'}`;
   oriMsg += `\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
-  // שלח לאורי ישירות ב-WhatsApp
   const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
-  for (const p of oriPhones) {
-    await sendWhatsApp(p, oriMsg);
+  for (const p of oriPhones) await sendWhatsApp(p, oriMsg);
+
+  // אישור מלא לשולח
+  let confirmMsg = `✅ תקלה נרשמה\n\n📍 ${machine.site_name}`;
+  if (machine.city) confirmMsg += `\n🏙️ ${machine.city}`;
+  if (machine.address) confirmMsg += ` | 📬 ${machine.address}`;
+  if (machine.location) confirmMsg += `\n🏢 ${machine.location}`;
+  confirmMsg += `\n🔧 ${machine.machine_type}`;
+  confirmMsg += `\n⚠️ ${s.faultDesc}`;
+  if (machine.contact_name) confirmMsg += `\n👤 ${machine.contact_name}`;
+  if (machine.contact_phone) confirmMsg += ` — ${machine.contact_phone}`;
+  if (hist && hist.length > 0) {
+    confirmMsg += `\n\n📜 תקלות אחרונות:`;
+    hist.slice(0,2).forEach(h => {
+      confirmMsg += `\n🔧 ${(h.closed_at||'').slice(0,10)} — ${h.actions?.join(' + ') || 'לא מצוין'}`;
+    });
   }
 
-  // החזר לפותח רק את עדכון הקבוצה
-  return groupUpdate || '✅ תקלה נרשמה';
+  return confirmMsg;
 }
 
 async function finishAssign(s, techName, phone) {
@@ -748,47 +898,33 @@ async function finishAssign(s, techName, phone) {
   techMsg += `\n⚠️ ${s.faultDesc}`;
   if (machine.contact_name) techMsg += `\n👤 ${machine.contact_name}`;
   if (machine.contact_phone) techMsg += ` — ${machine.contact_phone}`;
-  // 2 תקלות אחרונות עם תאריכים
   if (hist && hist.length > 0) {
     techMsg += `\n\n📜 תקלות אחרונות:`;
     hist.slice(0,2).forEach(h => {
-      const date = (h.closed_at||'').slice(0,10);
-      const acts = h.actions?.join(' + ') || 'לא מצוין';
-      techMsg += `\n🔧 ${date} — ${acts}`;
+      techMsg += `\n🔧 ${(h.closed_at||'').slice(0,10)} — ${h.actions?.join(' + ') || 'לא מצוין'}`;
     });
   }
-  if (recent >= 3) techMsg += `\n⚠️ ${recent} תקלות ב-60 יום האחרונים`;
+  if (recent >= 3) techMsg += `\n⚠️ ${recent} תקלות ב-60 יום`;
   techMsg += `\n\nכשתסיים — כתוב: סיימתי ${machine.site_name.split(' ')[0]}`;
 
-  // עדכון קבוצה
-  const groupMsg = `✅ ${machine.site_name}${machine.location?' | '+machine.location:''} | ${machine.machine_type}\n🔧 שויך ל${techName}`;
+  // לקבוצה
+  const groupMsg = `🔧 תקלה חדשה\n📍 ${machine.site_name}${machine.location?' | '+machine.location:''}\n🔧 ${machine.machine_type}\n⚠️ ${s.faultDesc}\n👨‍🔧 שויך ל${techName}`;
 
-  // שלח לטכנאי ישירות
-  const techPhones = {
-    'אבשלום': process.env.PHONE_AVSHALOM,
-    'בניה':   process.env.PHONE_BENIA,
-    'שקד':    process.env.PHONE_SHAKED,
-    'אלכס':   process.env.PHONE_ALEX,
-    'גבי':    process.env.PHONE_GABI,
-  };
   const techPhone = techPhones[techName];
   if (techPhone) await sendWhatsApp(techPhone, techMsg);
 
-  // אפס סשן מלא
   const phone2 = s._phone;
   sessions[phone2] = { step: 'idle' };
-  
-  // החזר לאורי אישור קצר
-  return `✅ שויך ל${techName} — הודעה נשלחה`;
+
+  return `✅ שויך ל${techName}\n\n${groupMsg}`;
 }
 
 async function doCloseTicket(s) {
   const ticket = await closeTicket(s.ticketId, s.actions, s.parts||[]);
   const siteCode = ticket?.customers?.site_code || s.siteCode;
-  const hist3 = await getHistory(siteCode, 3);
+  const hist2 = await getHistory(siteCode, 2);
   const recent = await countRecent(siteCode);
 
-  // עדכן מלאי אם הוחלפו חלקים
   let inventoryAlerts = '';
   if (s.parts && s.parts.length > 0) {
     for (const part of s.parts) {
@@ -802,79 +938,65 @@ async function doCloseTicket(s) {
   const c = ticket?.customers;
   const actText = s.actions.join(' + ');
   const partsText = s.parts?.length ? ` | חלקים: ${s.parts.join(', ')}` : '';
+  const openTime = fmtTime(s.openedAt);
+  const closeTime = fmtTime(new Date().toISOString());
 
-  // 3 תקלות אחרונות
-  const hist3Text = hist3.map(h =>
+  const hist2Text = hist2.map(h =>
     `🔧 ${(h.closed_at||'?').slice(0,10)} — ${h.actions ? h.actions.join(' + ') : 'לא מצוין'}`
   ).join('\n');
 
-  // התראות
   let alerts = '';
   if (recent >= 3) alerts += `\n⚠️ ${recent} תקלות ב-60 יום`;
-  const abnitCount = hist3.filter(h => h.actions?.includes('טיפול אבנית')).length;
+  const abnitCount = hist2.filter(h => h.actions?.includes('טיפול אבנית')).length;
   if (s.actions.includes('טיפול אבנית') && abnitCount >= 1) {
     alerts += '\n💧 אבנית חוזרת — שקול בדיקת מים או פילטר';
   }
 
-  // עדכון קבוצה
-  const groupMsg = `✅ ${c?.site_name||''} — ${s.closingMachine||c?.location||c?.machine_type||''} | ${c?.machine_type||''}\n🔧 ${actText}${partsText}\n\n📜 3 תקלות אחרונות:\n${hist3Text||'אין היסטוריה'}${alerts}`;
+  const groupMsg = `✅ ${c?.site_name||''} — ${s.closingMachine||c?.location||c?.machine_type||''}\n🔧 ${actText}${partsText}\n⏰ ${openTime} — ${closeTime}\n\n📜 2 תקלות אחרונות:\n${hist2Text||'אין היסטוריה'}${alerts}${inventoryAlerts}`;
 
   s.step = 'idle';
   return `📲 קבוצה:\n${groupMsg}`;
 }
 
-// ===== WEBHOOK =====
+async function doCollectMachine(s, machine) {
+  const note = s.pendingCollection;
+  if (machine) {
+    await supabase.from('customers').update({ is_active: false }).eq('site_code', machine.site_code);
+  }
+  s.step = 'idle';
+  const name = note?.client_name || machine?.site_name || '';
+  const machineType = machine?.machine_type || note?.machine_type || '';
+  const location = machine?.location ? ' | ' + machine.location : '';
+  const techName = s.collectionTech?.name || '';
+
+  const groupMsg = `✅ קבוצה:\n📤 ${name}${location} | ${machineType}\n🔧 מכונה נאספה ✓${techName ? ' על ידי ' + techName : ''}`;
+
+  const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+  for (const p of oriPhones) await sendWhatsApp(p, groupMsg);
+
+  return groupMsg;
+}
 
 // ===== קריאת תמונה עם Claude API =====
 async function readDeliveryNote(imageUrl) {
-  // הורד את התמונה עם Twilio authentication
   const authHeader = 'Basic ' + Buffer.from(`${process.env.TWILIO_SID}:${process.env.TWILIO_TOKEN}`).toString('base64');
-  const imgResponse = await fetch(imageUrl, {
-    headers: { 'Authorization': authHeader }
-  });
+  const imgResponse = await fetch(imageUrl, { headers: { 'Authorization': authHeader } });
   const imgBuffer = await imgResponse.arrayBuffer();
   const imageData = Buffer.from(imgBuffer).toString('base64');
   const mediaType = imgResponse.headers.get('content-type') || 'image/jpeg';
 
-  // שלח ל-Claude API
   const apiKey = (process.env.ANTHROPIC_KEY || '').trim();
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 1000,
       messages: [{
         role: 'user',
         content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: imageData }
-          },
-          {
-            type: 'text',
-            text: `This is a delivery note from Mayer's Coffee. Extract the following fields as JSON only, no extra text.
-
-Instructions:
-- note_type: "איסוף" if the items table contains "סיום התקשרות" or "איסוף מכונה" in the product name (שם פריט), otherwise "התקנה"
-- collection_location: if note_type is "איסוף", extract the collection address/city from the product name (שם פריט) - it usually appears after "איסוף מכונה M12 -" or similar
-- client_name: the customer name from the "לכבוד" (To) field at the top right - write exactly as appears INCLUDING spaces between words
-- address: the street address below the customer name
-- city: the city below the address
-- machine_type: machine model like M12, F16, F15 from the items table
-- machine_quantity: the quantity number from the "כמות" column in the items table (integer)
-- contact_phone: the phone number next to the word "נייד" (mobile) in the top section - this is the customer phone
-- contact_name: customer contact person name if shown
-- delivery_note_number: the document number "מס'"
-- driver: driver name at the bottom
-
-Return only this JSON:
-{ "note_type": "", "client_name": "", "address": "", "city": "", "collection_location": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }`
-          }
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageData } },
+          { type: 'text', text: `This is a delivery note from Mayer's Coffee. Extract the following fields as JSON only, no extra text.\n\nInstructions:\n- note_type: "איסוף" if the items table contains "סיום התקשרות" or "איסוף מכונה" in the product name, otherwise "התקנה"\n- collection_location: if note_type is "איסוף", extract the collection address/city from the product name\n- client_name: the customer name from the "לכבוד" field\n- address: the street address below the customer name\n- city: the city below the address\n- machine_type: machine model like M12, F16, F15\n- machine_quantity: the quantity number from the "כמות" column (integer)\n- contact_phone: the phone number next to "נייד"\n- contact_name: customer contact person name\n- delivery_note_number: the document number "מס'"\n- driver: driver name at the bottom\n\nReturn only this JSON:\n{ "note_type": "", "client_name": "", "address": "", "city": "", "collection_location": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }` }
         ]
       }]
     })
@@ -886,112 +1008,39 @@ Return only this JSON:
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
-
-// מיפוי חלקים לקודי מלאי
-const PART_TO_INVENTORY = {
-  'נשם': 'נשם חלב',
-  'ברז חשמלי': 'ברז',
-  'קפוצינטור': 'קפוצינטור',
-  'יחידת חליטה': 'יחידת חליטה',
-  'טרמובלוק (דוד)': 'מכלול דוד שלם'
-};
-
-async function deductInventory(partName) {
-  // מצא את הפריט במלאי לפי שם חלקי
-  const searchName = PART_TO_INVENTORY[partName] || partName;
-  const {data: items} = await supabase
-    .from('inventory')
-    .select('id, part_name, quantity')
-    .ilike('part_name', '%'+searchName+'%')
-    .limit(1);
-  
-  if (!items || !items.length) return null;
-  
-  const item = items[0];
-  const newQty = Math.max(0, (item.quantity || 0) - 1);
-  
-  await supabase
-    .from('inventory')
-    .update({ quantity: newQty, updated_at: new Date().toISOString() })
-    .eq('id', item.id);
-  
-  return { name: item.part_name, oldQty: item.quantity, newQty };
-}
-
-async function checkLowInventory() {
-  // בדוק פריטים עם כמות נמוכה (פחות מ-5)
-  const {data} = await supabase
-    .from('inventory')
-    .select('part_name, quantity')
-    .lt('quantity', 5)
-    .gt('quantity', -1)
-    .order('quantity');
-  return data || [];
-}
-
-// ===== סגירת איסוף =====
-async function doCollectMachine(s, machine) {
-  const note = s.pendingCollection;
-  
-  if (machine) {
-    await supabase.from('customers').update({ is_active: false }).eq('site_code', machine.site_code);
-  }
-  
-  s.step = 'idle';
-  const name = note?.client_name || machine?.site_name || '';
-  const machineType = machine?.machine_type || note?.machine_type || '';
-  const location = machine?.location ? ' | ' + machine.location : '';
-  const techName = s.collectionTech?.name || '';
-
-  const groupMsg = `✅ קבוצה:\n📤 ${name}${location} | ${machineType}\n🔧 מכונה נאספה ✓${techName ? ' על ידי ' + techName : ''}`;
-
-  // שלח לאורי ועודד
-  const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
-  for (const p of oriPhones) {
-    await sendWhatsApp(p, groupMsg);
-  }
-
-  return groupMsg;
-}
-
-// ===== סיכום יומי אלכס ב-18:00 =====
+// ===== סיכום יומי מעבדה ב-18:00 =====
 async function sendDailySummaryAlex() {
   const today = new Date();
   today.setHours(0,0,0,0);
   const {data: jobs} = await supabase.from('lab_jobs')
-    .select('*')
-    .gte('started_at', today.toISOString())
-    .not('completed_at', 'is', null)
-    .order('started_at');
-  
+    .select('*').gte('started_at', today.toISOString())
+    .not('completed_at', 'is', null).order('started_at');
+
   if (!jobs || !jobs.length) return;
-  
+
   let summary = `📋 סיכום מעבדה — ${today.toLocaleDateString('he-IL')}\n\n`;
-  summary += '| מכונה | פעולה | חלקים |\n';
-  summary += '|-------|--------|--------|\n';
+  summary += `מכונה | התחלה | סיום | פעולה | חלקים שהוחלפו\n`;
+  summary += `${'─'.repeat(60)}\n`;
   jobs.forEach(j => {
     const act = j.actions ? j.actions.join(' + ') : '—';
     const parts = j.parts?.length ? j.parts.join(', ') : '—';
-    summary += `| ${j.machine_type} | ${act} | ${parts} |\n`;
+    const start = fmtTime(j.started_at);
+    const end = fmtTime(j.completed_at);
+    summary += `${j.machine_type} | ${start} | ${end} | ${act} | ${parts}\n`;
   });
-  summary += `\nסה"כ: ${jobs.length} מכונות תוקנו`;
-  
-  // שלח לאורי ועודד
+  summary += `\nסה"כ: ${jobs.length} מכונות`;
+
   const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
-  for (const p of oriPhones) {
-    await sendWhatsApp(p, summary);
-  }
-  console.log('סיכום יומי אלכס נשלח:', summary);
+  for (const p of oriPhones) await sendWhatsApp(p, summary);
+  console.log('סיכום יומי מעבדה נשלח');
 }
 
-// הרץ כל דקה ובדוק אם 18:00
 setInterval(() => {
   const now = new Date();
-  if (now.getHours() === 18 && now.getMinutes() === 0) {
-    sendDailySummaryAlex();
-  }
+  if (now.getHours() === 18 && now.getMinutes() === 0) sendDailySummaryAlex();
 }, 60000);
 
+// ===== WEBHOOK =====
 app.post('/webhook', async (req, res) => {
   try {
     const from = req.body.From;
@@ -1000,19 +1049,27 @@ app.post('/webhook', async (req, res) => {
     const mediaType = req.body.MediaContentType0;
     console.log(`📨 ${from}: ${body}${mediaUrl?' [תמונה]':''}`);
 
-    // טיפול בתמונה — תעודת התקנה
     if (mediaUrl && mediaType && mediaType.startsWith('image/')) {
       const phone = from.replace('whatsapp:','');
       if (!sessions[phone]) sessions[phone] = {step:'idle'};
       const s = sessions[phone];
 
-      // אם בשלב installation_confirm — זו תעודה עם חתימה (סגירה התקנה)
+      // סגירת התקנה עם תמונה
       if (s.step === 'installation_confirm') {
+        s.installationPhotoUrl = mediaUrl;
+        const qty = s.installationQty || 1;
+        if (qty > 1) {
+          s.step = 'installation_location';
+          s.installationLocations = [];
+          const twiml = new twilio.twiml.MessagingResponse();
+          twiml.message(`מכונה 1 — באיזה מיקום הותקנה?`);
+          res.type('text/xml');
+          return res.send(twiml.toString());
+        }
+        // מכונה אחת — סיים ישירות
         await supabase.from('installations').update({
-          signed_note_url: mediaUrl,
-          completed_at: new Date().toISOString()
+          signed_note_url: mediaUrl, completed_at: new Date().toISOString()
         }).eq('id', s.installationId);
-
         if (s.pendingCustomer) {
           await supabase.from('customers').insert({
             site_code: 'NEW-' + Date.now(),
@@ -1023,110 +1080,102 @@ app.post('/webhook', async (req, res) => {
             contact_phone: s.pendingCustomer.contact_phone,
             machine_type: s.pendingCustomer.machine_type,
             is_active: true
-          }).select().single();
+          });
         }
-
         s.step = 'idle';
+        const groupMsg = `✅ התקנה הושלמה\n📍 ${s.pendingCustomer?.client_name||''} | ${s.pendingCustomer?.city||''}\n🔧 ${s.pendingCustomer?.machine_type||''}\n👨‍🔧 ${s.installationTech?.name||''}`;
         const twiml = new twilio.twiml.MessagingResponse();
-        twiml.message(`✅ התקנה הושלמה ונרשמה!\n📍 ${s.pendingCustomer?.client_name || ''}\n🔧 ${s.pendingCustomer?.machine_type || ''}`);
+        twiml.message(groupMsg);
         res.type('text/xml');
         return res.send(twiml.toString());
       }
 
-      // אם בשלב collection_photo — זו תעודה עם חתימה (סגירה איסוף)
+      // סגירת איסוף עם תמונה
       if (s.step === 'collection_photo') {
-        // סמן מכונות שנאספו כלא פעילות
         const machinesToDeactivate = s.selectedCollectionMachines || s.collectionMachines || [];
         const qty = s.pendingCollection?.machine_quantity || 1;
         const toDeactivate = machinesToDeactivate.slice(0, qty);
-
         for (const machine of toDeactivate) {
-          await supabase.from('customers')
-            .update({ is_active: false })
-            .eq('id', machine.id);
+          await supabase.from('customers').update({ is_active: false }).eq('id', machine.id);
         }
-
         const note = s.pendingCollection;
         s.step = 'idle';
+        const groupMsg = `✅ איסוף הושלם\n📍 ${note?.client_name||''}\n🔧 ${toDeactivate.length} מכונות נאספו\n👨‍🔧 ${s.collectionTech?.name||''}`;
+        const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+        for (const p of oriPhones) await sendWhatsApp(p, groupMsg);
         const twiml = new twilio.twiml.MessagingResponse();
-        twiml.message(`✅ איסוף הושלם!\n📍 ${note?.client_name || ''}\n🔧 ${toDeactivate.length} מכונות הוסרו ממסד הנתונים\n\n📲 קבוצה:\n🔄 ${note?.client_name || ''} — סיום התקשרות\n🔧 ${toDeactivate.length} מכונות נאספו על ידי ${s.collectionTech?.name || ''}`);
+        twiml.message(groupMsg);
         res.type('text/xml');
         return res.send(twiml.toString());
       }
 
-      // אחרת — תעודה חדשה מגבי
+      // תעודה חדשה מגבי
       try {
         const noteData = await readDeliveryNote(mediaUrl);
-        sessions[phone].pendingNote = noteData;
-        sessions[phone].step = 'installation_assign';
-
+        const isCollection = noteData.note_type === 'איסוף';
+        const qty = noteData.machine_quantity || 1;
         const techs = await getTechnicians();
         sessions[phone].techs = techs;
 
-        const isCollection = noteData.note_type === 'איסוף';
-      const qty = noteData.machine_quantity || 1;
+        if (isCollection) {
+          const firstWord = noteData.client_name.split(' ')[0];
+          const {data: allMachines} = await supabase.from('customers')
+            .select('id, site_name, city, location, machine_type, site_code')
+            .ilike('site_name', '%'+firstWord+'%').eq('is_active', true).limit(15);
 
-      if (isCollection) {
-        // תהליך איסוף
-        // חפש לפי שם + סנן לפי עיר
-        const firstWord = noteData.client_name.split(' ')[0];
-        let machineQuery = supabase.from('customers')
-          .select('id, site_name, city, location, machine_type, site_code')
-          .ilike('site_name', '%'+firstWord+'%')
-          .eq('is_active', true)
-          .limit(15);
-        
-        const {data: allMachines} = await machineQuery;
-        // סנן לפי עיר אם יש
-        let existingMachines = allMachines || [];
-        // סנן לפי מיקום האיסוף (לא עיר הלקוח)
-        const filterCity = noteData.collection_location || noteData.city;
-        if (filterCity && existingMachines.length > 1) {
-          const filtered = existingMachines.filter(m => 
-            m.city?.includes(filterCity) || filterCity?.includes(m.city) ||
-            m.site_name?.includes(filterCity)
-          );
-          if (filtered.length > 0) existingMachines = filtered;
+          let existingMachines = allMachines || [];
+          const filterCity = noteData.collection_location || noteData.city;
+          if (filterCity && existingMachines.length > 1) {
+            const filtered = existingMachines.filter(m =>
+              m.city?.includes(filterCity) || filterCity?.includes(m.city) || m.site_name?.includes(filterCity)
+            );
+            if (filtered.length > 0) existingMachines = filtered;
+          }
+
+          sessions[phone].pendingCollection = noteData;
+          sessions[phone].collectionMachines = existingMachines;
+          sessions[phone].step = 'collection_assign';
+
+          let machineList = '';
+          if (existingMachines.length > 0) {
+            machineList = '\n\n🔧 מכונות במסד:\n' + existingMachines.map((m,i) => {
+              const letter = String.fromCharCode(0x05D0 + i);
+              return `${letter}) ${m.location||'לא מצוין'} | ${m.machine_type} | ${m.city}`;
+            }).join('\n');
+          }
+
+          const collCard = `🔄 סיום התקשרות זוהה!\n📍 ${noteData.client_name}\n🏙️ מיקום איסוף: ${noteData.collection_location||noteData.city}\n🔧 ${noteData.machine_type} | כמות: ${qty}\n📄 תעודה: ${noteData.delivery_note_number}${machineList}\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+
+          // שלח לאורי
+          const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+          for (const p of oriPhones) await sendWhatsApp(p, collCard);
+
+          const twiml = new twilio.twiml.MessagingResponse();
+          twiml.message('✅ תעודת איסוף נקראה — נשלחה לאורי לשיוך');
+          res.type('text/xml');
+          return res.send(twiml.toString());
         }
 
-        sessions[phone].pendingCollection = noteData;
-        sessions[phone].collectionMachines = existingMachines || [];
-        sessions[phone].step = 'collection_assign';
+        // התקנה רגילה
+        const {data: existingCustomer} = await supabase.from('customers')
+          .select('site_name').ilike('site_name', '%'+noteData.client_name.split(' ')[0]+'%')
+          .eq('is_active', true).limit(1);
+        const isNew = !existingCustomer || existingCustomer.length === 0;
+        const qtyText = qty > 1 ? ` | ${qty} מכונות` : '';
+        const card = `📦 התקנה חדשה!\n${isNew?'🆕 לקוח חדש':'✅ לקוח קיים'}\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}${qtyText}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
-        let machineList = '';
-        if (existingMachines && existingMachines.length > 0) {
-          machineList = '\n\n🔧 מכונות במסד:\n' + existingMachines.map((m,i) =>
-            `${i+1}️⃣ ${m.location || 'לא מצוין'} | ${m.machine_type} | ${m.city}`
-          ).join('\n');
-        }
+        sessions[phone].pendingNote = noteData;
+        sessions[phone].step = 'installation_assign';
 
-        const collectionCity = noteData.collection_location || noteData.city;
-        const collCard = `🔄 סיום התקשרות זוהה!\n📍 ${noteData.client_name}\n🏙️ מיקום איסוף: ${collectionCity}\n🔧 ${noteData.machine_type} | כמות: ${qty}\n📄 תעודה: ${noteData.delivery_note_number}${machineList}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
-        
-        const twiml2 = new twilio.twiml.MessagingResponse();
-        twiml2.message(collCard);
-        res.type('text/xml');
-        return res.send(twiml2.toString());
-      }
-
-      // תהליך התקנה רגיל
-      const {data: existingCustomer} = await supabase
-        .from('customers')
-        .select('site_name, city')
-        .ilike('site_name', '%'+noteData.client_name.split(' ')[0]+'%')
-        .eq('is_active', true)
-        .limit(1);
-      
-      const isNew = !existingCustomer || existingCustomer.length === 0;
-      const customerStatus = isNew ? `🆕 לקוח חדש` : `✅ לקוח קיים`;
-      const qtyText = qty > 1 ? ` | ${qty} מכונות` : '';
-      
-      const card = `📦 התקנה חדשה זוהתה!\n${customerStatus}\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}${qtyText}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nלאיזה טכנאי לשייך?\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
+        // שלח לאורי
+        const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+        for (const p of oriPhones) await sendWhatsApp(p, card);
 
         const twiml = new twilio.twiml.MessagingResponse();
-        twiml.message(card);
+        twiml.message('✅ תעודת התקנה נקראה — נשלחה לאורי לשיוך');
         res.type('text/xml');
         return res.send(twiml.toString());
+
       } catch(e) {
         console.error('שגיאה בקריאת תעודה:', e);
         const twiml = new twilio.twiml.MessagingResponse();
@@ -1152,229 +1201,6 @@ app.post('/webhook', async (req, res) => {
 });
 
 app.get('/', (req, res) => res.send('מאיירס בוט — פעיל ✅'));
-
-app.get('/dashboard', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>מאיירס קפה — דשבורד תקלות</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f1117; color: #e8e8e8; padding: 24px; direction: rtl; }
-  h1 { font-size: 22px; font-weight: 500; color: #fff; margin-bottom: 4px; }
-  .subtitle { font-size: 13px; color: #666; margin-bottom: 24px; }
-  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-  .card { background: #1a1d27; border-radius: 10px; padding: 16px; border: 1px solid #2a2d3a; }
-  .card-label { font-size: 12px; color: #666; margin-bottom: 6px; }
-  .card-value { font-size: 26px; font-weight: 500; color: #fff; }
-  .card-sub { font-size: 12px; color: #4ade80; margin-top: 4px; }
-  .section { background: #1a1d27; border-radius: 10px; padding: 20px; border: 1px solid #2a2d3a; margin-bottom: 16px; }
-  .section-title { font-size: 13px; font-weight: 500; color: #888; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .chart-wrap { position: relative; width: 100%; }
-  .insight { background: #12151f; border-right: 3px solid #185FA5; padding: 12px 16px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; color: #aaa; line-height: 1.6; }
-  .insight span { color: #fff; font-weight: 500; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; margin-right: 4px; }
-  .badge-blue { background: #0c447c; color: #85b7eb; }
-  .badge-green { background: #085041; color: #5dcaa5; }
-  .badge-orange { background: #714f0b; color: #ef9f27; }
-  .badge-gray { background: #2c2c2a; color: #888780; }
-  @media (max-width: 700px) { .cards { grid-template-columns: repeat(2, 1fr); } .grid-2 { grid-template-columns: 1fr; } }
-</style>
-</head>
-<body>
-
-<h1>☕ מאיירס קפה — דשבורד תקלות</h1>
-<p class="subtitle">אפריל 2025 — אפריל 2026 | 1,532 סגירות | ימי עבודה בלבד</p>
-
-<div class="cards">
-  <div class="card">
-    <div class="card-label">סה"כ סגירות</div>
-    <div class="card-value">1,532</div>
-    <div class="card-sub">↑ מגמת עלייה</div>
-  </div>
-  <div class="card">
-    <div class="card-label">ממוצע חודשי</div>
-    <div class="card-value">128</div>
-    <div class="card-sub">מרץ 2026 — שיא: 187</div>
-  </div>
-  <div class="card">
-    <div class="card-label">טכנאי מוביל</div>
-    <div class="card-value">אבשלום</div>
-    <div class="card-sub">599 סגירות</div>
-  </div>
-  <div class="card">
-    <div class="card-label">שעת עומס</div>
-    <div class="card-value">11–13</div>
-    <div class="card-sub">~40% מהסגירות</div>
-  </div>
-</div>
-
-<div class="section">
-  <div class="section-title">סגירות לפי חודש</div>
-  <div class="chart-wrap" style="height:200px">
-    <canvas id="monthChart"></canvas>
-  </div>
-</div>
-
-<div class="grid-2">
-  <div class="section">
-    <div class="section-title">לפי טכנאי</div>
-    <div class="chart-wrap" style="height:200px">
-      <canvas id="techChart"></canvas>
-    </div>
-  </div>
-  <div class="section">
-    <div class="section-title">לפי שעה ביום</div>
-    <div class="chart-wrap" style="height:200px">
-      <canvas id="hourChart"></canvas>
-    </div>
-  </div>
-</div>
-
-<div class="section">
-  <div class="section-title">פעולות נפוצות (ללא "לא מצוין")</div>
-  <div class="chart-wrap" style="height:280px">
-    <canvas id="actionChart"></canvas>
-  </div>
-</div>
-
-<div class="section">
-  <div class="section-title">ביצועי טכנאים לפי חודש</div>
-  <div class="chart-wrap" style="height:220px">
-    <canvas id="techMonthChart"></canvas>
-  </div>
-</div>
-
-<div class="section">
-  <div class="section-title">תובנות עיקריות</div>
-  <div class="insight"><span>שקד בעלייה חדה</span> — הצטרף אוקטובר 2025 עם 2 סגירות, ובמרץ 2026 כבר 98 — עקף את בניה.</div>
-  <div class="insight"><span>החלפת מכונה</span> — הפעולה הנפוצה ביותר: 378 פעמים (25% מהסגירות המזוהות). שווה לבדוק אם יש לקוחות שחוזרים.</div>
-  <div class="insight"><span>אוקטובר 2025 — ירידה</span> — רק 72 סגירות לעומת 141 באוגוסט. כנראה קשור לחגים / שינוי עונתי.</div>
-  <div class="insight"><span>שעות עומס: 11:00–13:00</span> — 599 סגירות בשלוש שעות אלה. שעות הבוקר יותר פנויות.</div>
-  <div class="insight"><span>מגמת עלייה</span> — ינואר–מרץ 2026 חזקים מכל הרביע המקביל. הצי גדל.</div>
-</div>
-
-<p style="font-size:11px; color:#333; text-align:center; margin-top:16px;">מאיירס קפה × Claude | נוצר אוטומטית</p>
-
-<script>
-const months = ['אפר 25','מאי 25','יונ 25','יול 25','אוג 25','ספט 25','אוק 25','נוב 25','דצמ 25','ינו 26','פבר 26','מרץ 26'];
-const monthData = [124,114,100,130,141,129,72,111,108,134,175,187];
-
-Chart.defaults.color = '#666';
-Chart.defaults.borderColor = '#2a2d3a';
-
-new Chart(document.getElementById('monthChart'), {
-  type: 'bar',
-  data: {
-    labels: months,
-    datasets: [{
-      data: monthData,
-      backgroundColor: monthData.map(v => v === Math.max(...monthData) ? '#378ADD' : '#185FA5'),
-      borderRadius: 4
-    }]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => \` \${ctx.parsed.y} סגירות\` } } },
-    scales: {
-      x: { ticks: { font: { size: 11 }, autoSkip: false, maxRotation: 45 }, grid: { display: false } },
-      y: { ticks: { font: { size: 11 } } }
-    }
-  }
-});
-
-new Chart(document.getElementById('techChart'), {
-  type: 'doughnut',
-  data: {
-    labels: ['אבשלום', 'בניה', 'שקד', 'אלכס'],
-    datasets: [{
-      data: [599, 521, 236, 176],
-      backgroundColor: ['#185FA5','#1D9E75','#D85A30','#5F5E5A'],
-      borderWidth: 0, hoverOffset: 4
-    }]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: {
-      legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 10, boxWidth: 10, color: '#aaa' } },
-      tooltip: { callbacks: { label: ctx => \` \${ctx.label}: \${ctx.parsed} (\${Math.round(ctx.parsed/1532*100)}%)\` } }
-    }
-  }
-});
-
-new Chart(document.getElementById('hourChart'), {
-  type: 'bar',
-  data: {
-    labels: ['7','8','9','10','11','12','13','14','15','16','17','18'],
-    datasets: [{
-      data: [3,61,174,170,203,205,191,172,179,109,53,10],
-      backgroundColor: '#0F6E56',
-      borderRadius: 3
-    }]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { ticks: { font: { size: 11 } }, grid: { display: false } },
-      y: { ticks: { font: { size: 11 } } }
-    }
-  }
-});
-
-new Chart(document.getElementById('actionChart'), {
-  type: 'bar',
-  data: {
-    labels: ['החלפת מכונה','טיפול אבנית','החלפת ברז חשמלי','החלפת תבריג','החלפת צינורית חלב','החלפת נשם','החלפת מקרר','החלפת קפוצינטור','החלפת בילט'],
-    datasets: [{
-      data: [378,179,66,64,62,61,60,51,8],
-      backgroundColor: ['#D85A30','#BA7517','#185FA5','#185FA5','#185FA5','#185FA5','#185FA5','#185FA5','#5F5E5A'],
-      borderRadius: 3
-    }]
-  },
-  options: {
-    indexAxis: 'y',
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => \` \${ctx.parsed.x} פעמים\` } } },
-    scales: {
-      x: { ticks: { font: { size: 11 } } },
-      y: { ticks: { font: { size: 11 } }, grid: { display: false } }
-    }
-  }
-});
-
-new Chart(document.getElementById('techMonthChart'), {
-  type: 'line',
-  data: {
-    labels: months,
-    datasets: [
-      { label: 'אבשלום', data: [46,40,40,52,40,54,31,50,57,63,67,59], borderColor: '#185FA5', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 },
-      { label: 'בניה', data: [57,41,50,67,78,55,26,27,32,35,28,25], borderColor: '#1D9E75', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 },
-      { label: 'שקד', data: [0,0,0,0,0,0,2,14,15,27,75,98], borderColor: '#D85A30', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 },
-      { label: 'אלכס', data: [21,33,10,11,23,20,13,20,4,9,5,5], borderColor: '#888780', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3 }
-    ]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: {
-      legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 12, boxWidth: 12, color: '#aaa' } }
-    },
-    scales: {
-      x: { ticks: { font: { size: 11 }, autoSkip: false, maxRotation: 45 }, grid: { display: false } },
-      y: { ticks: { font: { size: 11 } } }
-    }
-  }
-});
-</script>
-</body>
-</html>
-`);
-});
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => console.log(`בוט פועל על פורט ${PORT}`));
