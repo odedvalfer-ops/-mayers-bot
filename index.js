@@ -119,7 +119,7 @@ async function countRecent(siteCode, days=60) {
 }
 
 async function getTechnicians() {
-  const {data} = await supabase.from('technicians').select('*').in('role',['field']).eq('is_active',true);
+  const {data} = await supabase.from('technicians').select('*').in('role',['field','lab']).eq('is_active',true);
   return data||[];
 }
 
