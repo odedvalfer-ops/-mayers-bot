@@ -233,7 +233,6 @@ async function broadcastAll(message) {
     process.env.PHONE_DUDI,
     process.env.PHONE_AMIR,
   ].filter(Boolean);
-  console.log('📢 broadcastAll — שולח ל', allPhones.length, 'אנשים:', allPhones);
   for (const p of allPhones) {
     await sendWhatsApp(p, message);
   }
@@ -435,9 +434,10 @@ async function handleMessage(from, body) {
 
       const techPhone = techPhones[tech.name];
       if (techPhone) await sendWhatsApp(techPhone, techMsg);
+      await broadcastAll(groupMsg);
 
       s.step = 'idle';
-      return `✅ שויך ל${tech.name}\n\n${groupMsg}`;
+      return `✅ שויך ל${tech.name}`;
     }
     return 'בחר מספר מהרשימה';
   }
@@ -647,6 +647,14 @@ async function handleMessage(from, body) {
       const collectionOpenMsg = `🔄 איסוף נפתח\n📍 ${note.client_name}\n🏙️ ${note.city}\n🔧 ${note.machine_type} | כמות: ${qty}\n👨‍🔧 שויך ל${tech.name}`;
       await broadcastAll(collectionOpenMsg);
 
+      // נקה את הסשן של המנהל השני
+      const otherManagersC = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(p => p && p !== s._phone);
+      for (const op of otherManagersC) {
+        if (sessions[op] && sessions[op].step === 'collection_assign') {
+          sessions[op] = { step: 'idle' };
+        }
+      }
+
       return `✅ שויך ל${tech.name}`;
     }
     return 'בחר מספר מהרשימה';
@@ -695,6 +703,14 @@ async function handleMessage(from, body) {
       s.installationTech = tech;
       s.pendingCustomer = note;
       s.step = 'idle';
+
+      // נקה את הסשן של המנהל השני
+      const otherManagers = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(p => p && p !== s._phone);
+      for (const op of otherManagers) {
+        if (sessions[op] && sessions[op].step === 'installation_assign') {
+          sessions[op] = { step: 'idle' };
+        }
+      }
 
       const qtyText = qty > 1 ? ` | ${qty} מכונות` : '';
       const techMsg = `📦 משימת התקנה חדשה!\n📍 ${note.client_name}\n🏙️ ${note.city}\n📬 ${note.address}\n🔧 ${note.machine_type}${qtyText}\n👤 ${note.contact_name} — ${note.contact_phone}\n\nכשתסיים — צלם תעודה חתומה ושלח עם המילה: הותקן`;
@@ -798,7 +814,7 @@ async function handleWhatOpen(s, user) {
 
   // תקלות
   let ticketQuery = supabase.from('tickets')
-    .select('*,customers(site_name,machine_type,location,city)')
+    .select('*,customers(site_name,machine_type,location,city),technicians(name)')
     .eq('status','open').order('opened_at',{ascending:false});
 
   const {data: openTickets} = await ticketQuery;
@@ -827,7 +843,7 @@ async function handleWhatOpen(s, user) {
     msg += 'אין תקלות פתוחות\n';
   } else {
     tickets.forEach((t,i) => {
-      const techName = t.technician_name || 'לא משויך';
+      const techName = t.technicians?.name || 'לא משויך';
       msg += `${i+1}. ${t.customers?.site_name||'?'} | ${t.customers?.machine_type||''} | ${t.description||''}\n`;
       msg += `   👨‍🔧 ${techName} | ⏰ ${fmtTime(t.opened_at)}\n`;
     });
@@ -1036,25 +1052,7 @@ async function readDeliveryNote(imageUrl) {
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageData } },
-          { type: 'text', text: `This is a document from Mayer's Coffee. Extract information regardless of document type (invoice or delivery note).
-
-CRITICAL for client_name: Read the Hebrew text in the "לכבוד" field extremely carefully, character by character. Do NOT guess. Copy the EXACT name as written, including dots, hyphens, apostrophes.
-
-Extract these fields as JSON only, no extra text:
-- note_type: "איסוף" if items contain "סיום התקשרות" or "איסוף מכונה", otherwise "התקנה"
-- collection_location: if איסוף, extract collection city/address from product name
-- client_name: EXACT text from "לכבוד" field copied character by character
-- address: street address below customer name
-- city: city below the address
-- machine_type: machine model like M12, F16, F15
-- machine_quantity: quantity from "כמות" column (integer)
-- contact_phone: phone number next to "נייד"
-- contact_name: contact person name if shown
-- delivery_note_number: document number "מס'"
-- driver: driver name at the bottom
-
-Return only this JSON:
-{ "note_type": "", "client_name": "", "address": "", "city": "", "collection_location": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }` }
+          { type: 'text', text: `This is a delivery note from Mayer's Coffee. Extract the following fields as JSON only, no extra text.\n\nInstructions:\n- note_type: "איסוף" if the items table contains "סיום התקשרות" or "איסוף מכונה" in the product name, otherwise "התקנה"\n- collection_location: if note_type is "איסוף", extract the collection address/city from the product name\n- client_name: the customer name from the "לכבוד" field\n- address: the street address below the customer name\n- city: the city below the address\n- machine_type: machine model like M12, F16, F15\n- machine_quantity: the quantity number from the "כמות" column (integer)\n- contact_phone: the phone number next to "נייד"\n- contact_name: customer contact person name\n- delivery_note_number: the document number "מס'"\n- driver: driver name at the bottom\n\nReturn only this JSON:\n{ "note_type": "", "client_name": "", "address": "", "city": "", "collection_location": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }` }
         ]
       }]
     })
@@ -1190,9 +1188,10 @@ app.post('/webhook', async (req, res) => {
             if (filtered.length > 0) existingMachines = filtered;
           }
 
+          // שמור בסשן של גבי
           sessions[phone].pendingCollection = noteData;
           sessions[phone].collectionMachines = existingMachines;
-          sessions[phone].step = 'collection_assign';
+          sessions[phone].step = 'idle';
 
           let machineList = '';
           if (existingMachines.length > 0) {
@@ -1204,9 +1203,16 @@ app.post('/webhook', async (req, res) => {
 
           const collCard = `🔄 סיום התקשרות זוהה!\n📍 ${noteData.client_name}\n🏙️ מיקום איסוף: ${noteData.collection_location||noteData.city}\n🔧 ${noteData.machine_type} | כמות: ${qty}\n📄 תעודה: ${noteData.delivery_note_number}${machineList}\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
-          // שלח לאורי
-          const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
-          for (const p of oriPhones) await sendWhatsApp(p, collCard);
+          // שמור בסשן של אורי ועודד כדי שיוכלו לבחור
+          const oriPhonesC = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+          for (const oriP of oriPhonesC) {
+            if (!sessions[oriP]) sessions[oriP] = {step:'idle'};
+            sessions[oriP].pendingCollection = noteData;
+            sessions[oriP].collectionMachines = existingMachines;
+            sessions[oriP].techs = techs;
+            sessions[oriP].step = 'collection_assign';
+            await sendWhatsApp(oriP, collCard);
+          }
 
           const twiml = new twilio.twiml.MessagingResponse();
           twiml.message('✅ תעודת איסוף נקראה — נשלחה לאורי לשיוך');
@@ -1222,12 +1228,19 @@ app.post('/webhook', async (req, res) => {
         const qtyText = qty > 1 ? ` | ${qty} מכונות` : '';
         const card = `📦 התקנה חדשה!\n${isNew?'🆕 לקוח חדש':'✅ לקוח קיים'}\n📍 ${noteData.client_name}\n🏙️ ${noteData.city}\n📬 ${noteData.address}\n🔧 ${noteData.machine_type}${qtyText}\n👤 ${noteData.contact_name} — ${noteData.contact_phone}\n📄 תעודה: ${noteData.delivery_note_number}\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
+        // שמור בסשן של גבי
         sessions[phone].pendingNote = noteData;
-        sessions[phone].step = 'installation_assign';
+        sessions[phone].step = 'idle';
 
-        // שלח לאורי
-        const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
-        for (const p of oriPhones) await sendWhatsApp(p, card);
+        // שמור בסשן של אורי ועודד כדי שיוכלו לבחור טכנאי
+        const oriPhonesList = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+        for (const oriP of oriPhonesList) {
+          if (!sessions[oriP]) sessions[oriP] = {step:'idle'};
+          sessions[oriP].pendingNote = noteData;
+          sessions[oriP].techs = techs;
+          sessions[oriP].step = 'installation_assign';
+          await sendWhatsApp(oriP, card);
+        }
 
         const twiml = new twilio.twiml.MessagingResponse();
         twiml.message('✅ תעודת התקנה נקראה — נשלחה לאורי לשיוך');
