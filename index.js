@@ -233,6 +233,7 @@ async function broadcastAll(message) {
     process.env.PHONE_DUDI,
     process.env.PHONE_AMIR,
   ].filter(Boolean);
+  console.log('📢 broadcastAll — שולח ל', allPhones.length, 'אנשים:', allPhones);
   for (const p of allPhones) {
     await sendWhatsApp(p, message);
   }
@@ -1035,7 +1036,25 @@ async function readDeliveryNote(imageUrl) {
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageData } },
-          { type: 'text', text: `This is a delivery note from Mayer's Coffee. Extract the following fields as JSON only, no extra text.\n\nInstructions:\n- note_type: "איסוף" if the items table contains "סיום התקשרות" or "איסוף מכונה" in the product name, otherwise "התקנה"\n- collection_location: if note_type is "איסוף", extract the collection address/city from the product name\n- client_name: the customer name from the "לכבוד" field\n- address: the street address below the customer name\n- city: the city below the address\n- machine_type: machine model like M12, F16, F15\n- machine_quantity: the quantity number from the "כמות" column (integer)\n- contact_phone: the phone number next to "נייד"\n- contact_name: customer contact person name\n- delivery_note_number: the document number "מס'"\n- driver: driver name at the bottom\n\nReturn only this JSON:\n{ "note_type": "", "client_name": "", "address": "", "city": "", "collection_location": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }` }
+          { type: 'text', text: `This is a document from Mayer's Coffee. Extract information regardless of document type (invoice or delivery note).
+
+CRITICAL for client_name: Read the Hebrew text in the "לכבוד" field extremely carefully, character by character. Do NOT guess. Copy the EXACT name as written, including dots, hyphens, apostrophes.
+
+Extract these fields as JSON only, no extra text:
+- note_type: "איסוף" if items contain "סיום התקשרות" or "איסוף מכונה", otherwise "התקנה"
+- collection_location: if איסוף, extract collection city/address from product name
+- client_name: EXACT text from "לכבוד" field copied character by character
+- address: street address below customer name
+- city: city below the address
+- machine_type: machine model like M12, F16, F15
+- machine_quantity: quantity from "כמות" column (integer)
+- contact_phone: phone number next to "נייד"
+- contact_name: contact person name if shown
+- delivery_note_number: document number "מס'"
+- driver: driver name at the bottom
+
+Return only this JSON:
+{ "note_type": "", "client_name": "", "address": "", "city": "", "collection_location": "", "machine_type": "", "machine_quantity": 1, "contact_name": "", "contact_phone": "", "delivery_note_number": "", "driver": "" }` }
         ]
       }]
     })
