@@ -916,8 +916,18 @@ async function buildShiuach(s, machine, phone) {
   oriMsg += `\n\n🔧 טיפל בעבר: ${prevTech || 'לא ידוע'}`;
   oriMsg += `\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
+  // שמור session אצל אורי/עודד כדי שיוכלו לבחור טכנאי
   const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
-  for (const p of oriPhones) await sendWhatsApp(p, oriMsg);
+  for (const p of oriPhones) {
+    if (!sessions[p]) sessions[p] = {step:'idle'};
+    sessions[p].step = 'assign_tech_pick';
+    sessions[p].techs = techs;
+    sessions[p].ticket = ticket;
+    sessions[p].selectedMachine = machine;
+    sessions[p].faultDesc = s.faultDesc;
+    sessions[p]._phone = p;
+    await sendWhatsApp(p, oriMsg);
+  }
 
   // אישור מלא לשולח
   let confirmMsg = `✅ תקלה נרשמה\n\n📍 ${machine.site_name}`;
