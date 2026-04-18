@@ -179,6 +179,14 @@ async function deductInventory(partName) {
   return { name: item.part_name, oldQty: item.quantity, newQty };
 }
 
+// ===== PHONE NORMALIZATION =====
+// Fix for v13: session keys must match PHONE_* env vars (no leading '+').
+// Twilio sends `from` as "whatsapp:+972...", and env vars are stored as "972..." (no plus).
+// All session reads/writes must use this normalized form.
+function normalizePhone(from) {
+  return String(from || '').replace('whatsapp:', '').replace(/^\+/, '');
+}
+
 // ===== WHATSAPP =====
 async function sendWhatsApp(toPhone, message) {
   try {
@@ -240,7 +248,7 @@ async function broadcastAll(message) {
 
 // ===== MAIN HANDLER =====
 async function handleMessage(from, body) {
-  const phone = from.replace('whatsapp:','');
+  const phone = normalizePhone(from);
   const msg = body.trim();
   if (!sessions[phone]) sessions[phone] = {step:'idle'};
   const s = sessions[phone];
@@ -1116,7 +1124,7 @@ app.post('/webhook', async (req, res) => {
     console.log(`📨 ${from}: ${body}${mediaUrl?' [תמונה]':''}`);
 
     if (mediaUrl && mediaType && mediaType.startsWith('image/')) {
-      const phone = from.replace('whatsapp:','');
+      const phone = normalizePhone(from);
       if (!sessions[phone]) sessions[phone] = {step:'idle'};
       const s = sessions[phone];
 
