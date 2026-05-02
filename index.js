@@ -13,6 +13,36 @@ const TWILIO_NUMBER = 'whatsapp:+972584820015';
 
 // ===== תפריטים =====
 const ACTION_MENU = 'מה עשית?\n1️⃣ החלפת מכונה\n2️⃣ טיפול אבנית\n3️⃣ טיפול מטחנה\n4️⃣ ניקיון הקצפה\n5️⃣ החלפת חלק\n6️⃣ אחר — ציין ידנית';
+
+// v15: action menu options for use with Content Templates
+const ACTION_MENU_OPTIONS = [
+  { label: 'החלפת מכונה',       payload: 'act:1' },
+  { label: 'טיפול אבנית',        payload: 'act:2' },
+  { label: 'טיפול מטחנה',       payload: 'act:3' },
+  { label: 'ניקיון הקצפה',       payload: 'act:4' },
+  { label: 'החלפת חלק',          payload: 'act:5' },
+  { label: 'אחר — ציין ידנית',   payload: 'act:6' },
+];
+const ACTION_MENU_OPTIONS_WITH_DONE = [
+  ...ACTION_MENU_OPTIONS,
+  { label: 'לא — סגור תקלה',     payload: 'act:7' },
+];
+
+// Sends action menu as interactive list when CONTENT_SID is set, else returns the text fallback.
+// Caller pattern: `return await offerActionMenu(phone, false);` for first menu (6 options),
+//                 `return await offerActionMenu(phone, true);`  for "anything else?" menu (7 options).
+async function offerActionMenu(phone, withDone) {
+  const opts = withDone ? ACTION_MENU_OPTIONS_WITH_DONE : ACTION_MENU_OPTIONS;
+  const fallbackText = (withDone
+    ? 'עשית משהו נוסף?\n'
+    : 'מה עשית?\n') + opts.map((o,i) => `${i+1}️⃣ ${o.label}`).join('\n');
+  if (process.env.CONTENT_SID_ACTION_MENU) {
+    await sendInteractive(phone, fallbackText, 'action_menu',
+      buildPickListVars(withDone ? 'עשית משהו נוסף?' : 'מה עשית?', opts));
+    return null;
+  }
+  return fallbackText;
+}
 const MORE_MENU = 'עשית משהו נוסף?\n1️⃣ החלפת מכונה\n2️⃣ טיפול אבנית\n3️⃣ טיפול מטחנה\n4️⃣ ניקיון הקצפה\n5️⃣ החלפת חלק\n6️⃣ אחר — ציין ידנית\n7️⃣ לא — סגור תקלה';
 const PART_MENU = 'איזה חלק?\n1️⃣ ברז חשמלי\n2️⃣ תבריג\n3️⃣ צינורית חלב\n4️⃣ נשם\n5️⃣ מקרר\n6️⃣ קפוצינטור\n7️⃣ בילט\n8️⃣ יחידת חליטה\n9️⃣ אחר — ציין ידנית';
 
@@ -63,12 +93,66 @@ function fmtTime(iso) {
 
 const sessions = {};
 
+// ===== INTERACTIVE UX =====
+// Builds "pick from this set" prompts. In simulation, renders as numbered text.
+// In production, will render as WhatsApp Quick-Reply Buttons (≤3) or List Picker (≤10).
+// Each option carries a `payload` that uniquely identifies the choice — this lets
+// multi-pending taps (e.g. tech selection on different fault messages) route
+// to the right ticket without relying on session ordering.
+function interactivePrompt({ header, options, kind, contextId }) {
+  let body = header + '\n';
+  options.forEach((opt, i) => {
+    const num = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'][i] || `${i+1}.`;
+    body += `${num} ${opt.label}\n`;
+  });
+  return body.trim();
+  // In production, this returns an object {text, interactive: {...}}
+  // and sendWhatsApp routes to a Twilio Content Template instead.
+}
+
+// Resolve a user's reply (typed number, or button payload, or list item id) to
+// the chosen option from a list of options that were offered.
+function resolveSelection(reply, options) {
+  if (!options || !options.length) return null;
+  // 1) Exact payload match (production button click case)
+  const byPayload = options.find(o => o.payload === reply);
+  if (byPayload) return byPayload;
+  // 2) Numeric typed (1, 2, 3...) — backwards-compat & simulation
+  const trimmed = String(reply).trim();
+  const idx = parseInt(trimmed, 10) - 1;
+  if (idx >= 0 && idx < options.length) return options[idx];
+  // 3) Label match (user typed the name)
+  const byLabel = options.find(o => o.label === trimmed);
+  if (byLabel) return byLabel;
+  return null;
+}
+
 // ===== DB =====
+function normalizeHebrew(s) {
+  if (!s) return '';
+  return String(s)
+    .toLowerCase()
+    .replace(/[\u05F3'׳]/g, '')      // geresh variants
+    .replace(/["״]/g, '')            // gershayim, plain quote
+    .replace(/[\s\-_,.()]+/g, '')    // separators
+    .replace(/(.)\1+/g, '$1');       // collapse repeated chars
+}
+
 async function searchCustomers(clientName, cityName) {
   if (!clientName || clientName.length < 2) return [];
   const {data} = await supabase.from('customers').select('*')
     .ilike('site_name','%'+clientName+'%').eq('is_active',true).limit(20);
   let results = data || [];
+  // NEW: Hebrew-tolerant fuzzy match (handles typos, missing geresh, repeated letters)
+  if (results.length === 0) {
+    const needle = normalizeHebrew(clientName);
+    if (needle.length >= 2) {
+      const {data: all} = await supabase.from('customers').select('*').eq('is_active',true);
+      results = (all||[]).filter(c =>
+        normalizeHebrew(c.site_name).includes(needle)
+      ).slice(0,20);
+    }
+  }
   if (results.length === 0) {
     const words = clientName.split(/\s+/).filter(w => w.length > 2);
     const seen = new Map();
@@ -123,6 +207,12 @@ async function getTechnicians() {
   return data||[];
 }
 
+// NEW: fetch locations defined for a specific site
+async function getSiteLocations(siteCode) {
+  const {data} = await supabase.from('site_locations').select('*').eq('site_code', siteCode);
+  return data || [];
+}
+
 async function getPrevTech(siteCode) {
   const hist = await getHistory(siteCode, 3);
   if (!hist.length) return null;
@@ -137,7 +227,8 @@ async function openTicket(siteCode, machineLocation, description, openedBy) {
   const {data} = await supabase.from('tickets').insert({
     ticket_number: ticketNumber, site_code: siteCode,
     machine_location: machineLocation, description,
-    opened_by: openedBy, status: 'open'
+    opened_by: openedBy, status: 'open',
+    opened_at: new Date().toISOString()  // Explicit — don't rely on column default
   }).select().single();
   return data;
 }
@@ -202,6 +293,61 @@ async function sendWhatsApp(toPhone, message) {
   }
 }
 
+// ===== INTERACTIVE SEND (v15: WhatsApp Buttons / List Picker via Content API) =====
+// Sends a Twilio Content Template if the corresponding CONTENT_SID_* env var is set.
+// Falls back to plain text via sendWhatsApp() otherwise — so deploy is safe even
+// before Twilio Messaging Service + Meta template approval are complete.
+//
+// kind values:
+//   'pick_list'      → CONTENT_SID_PICK_FROM_LIST  (header + 2-10 options as List Picker)
+//   'confirm_yesno'  → CONTENT_SID_CONFIRM_YESNO   (header + 2 buttons: כן / לא)
+//   'tech_call'      → CONTENT_SID_TECH_CALL       (call card + 2 buttons: קיבלתי / סיימתי)
+//   'action_menu'    → CONTENT_SID_ACTION_MENU     (header + up to 10 actions as List Picker)
+async function sendInteractive(toPhone, fallbackText, kind, contentVariables) {
+  const sidByKind = {
+    pick_list:     process.env.CONTENT_SID_PICK_FROM_LIST,
+    confirm_yesno: process.env.CONTENT_SID_CONFIRM_YESNO,
+    tech_call:     process.env.CONTENT_SID_TECH_CALL,
+    action_menu:   process.env.CONTENT_SID_ACTION_MENU,
+  };
+  const contentSid = sidByKind[kind];
+
+  // No content SID configured for this kind → fall back to text mode
+  if (!contentSid) {
+    return await sendWhatsApp(toPhone, fallbackText);
+  }
+
+  try {
+    let num = String(toPhone).replace(/\D/g,'');
+    if (num.startsWith('0')) num = '972' + num.slice(1);
+    if (!num.startsWith('972')) num = '972' + num;
+    const to = '+' + num;
+    console.log(`📤 שולח (interactive ${kind}) ל:`, to);
+    await twilioClient.messages.create({
+      from: TWILIO_NUMBER,
+      to: `whatsapp:${to}`,
+      contentSid,
+      contentVariables: JSON.stringify(contentVariables || {}),
+    });
+    console.log(`✅ נשלח (interactive ${kind}) ל`, to);
+  } catch(e) {
+    // If Content API call fails for any reason, fall back to text so the message still gets through.
+    console.error(`❌ שגיאה בשליחה interactive ${kind}:`, toPhone, e.message, '— falling back to text');
+    return await sendWhatsApp(toPhone, fallbackText);
+  }
+}
+
+// Build content variables for the generic pick-from-list template.
+// Convention: {{1}} = header, {{2..11}} = up to 10 option labels (empty for unused slots).
+function buildPickListVars(header, options /* [{label, payload}] */) {
+  const vars = { 1: header };
+  for (let i = 0; i < 10; i++) {
+    vars[i + 2] = options[i]?.label || '';
+  }
+  return vars;
+}
+
+
 // ===== USER ROLES =====
 function getUserRole(phone) {
   const num = phone.replace(/^\+/,'').replace(/^0/,'972');
@@ -249,7 +395,7 @@ async function broadcastAll(message) {
 // ===== MAIN HANDLER =====
 async function handleMessage(from, body) {
   const phone = normalizePhone(from);
-  const msg = body.trim();
+  let msg = body.trim();
   if (!sessions[phone]) sessions[phone] = {step:'idle'};
   const s = sessions[phone];
   s._phone = phone;
@@ -282,6 +428,91 @@ async function handleMessage(from, body) {
     return 'כתוב: שייך [מספר] לפי הרשימה';
   }
 
+  // ===== NEW v15: tech button payload handling =====
+  // קיבלתי (ack) — quiet DM to Ori only
+  if (msg.startsWith('ack:')) {
+    const tNum = msg.split(':')[1];
+    if (!tNum) return null;
+    // Find the ticket
+    const {data: ticket} = await supabase.from('tickets')
+      .select('*,customers(site_name)')
+      .eq('ticket_number', tNum).single();
+    if (!ticket) return 'התקלה לא נמצאה.';
+    // Idempotent: if already acked, just say so
+    if (ticket.acknowledged_at) {
+      return 'כבר אושר.';
+    }
+    await supabase.from('tickets')
+      .update({ acknowledged_at: new Date().toISOString() })
+      .eq('id', ticket.id);
+    // Quiet DM to Ori only
+    const oriPhone = process.env.PHONE_ORI;
+    if (oriPhone) {
+      await sendWhatsApp(oriPhone, `✅ ${user.name} אישר ${tNum} (${ticket.customers?.site_name || ''})`);
+    }
+    return 'תודה — אישור נרשם.';
+  }
+
+  // סיימתי (done button on the call card) — same as typing "סיימתי KL-XXXXXX"
+  if (msg.startsWith('done:')) {
+    const tNum = msg.split(':')[1];
+    if (tNum) {
+      // Rewrite msg to the legacy form so the existing handler picks it up
+      // (will fall through to the idle block below)
+      msg = `סיימתי ${tNum}`;
+    }
+  }
+
+  // ===== NEW: payload-based routing for multi-pending assignments =====
+  // Must come BEFORE the idle block, because Ori may have step='idle' but pendingTickets set
+  if (s.pendingTickets && Object.keys(s.pendingTickets).length > 0) {
+    const pendingList = Object.values(s.pendingTickets);
+    let matchedEntry = null;
+    let matchedTech = null;
+
+    // Case A: explicit payload (production button click)
+    if (msg.startsWith('assign:')) {
+      const parts = msg.split(':');
+      const tNum = parts[1], techId = parts[2];
+      const entry = s.pendingTickets[tNum];
+      if (entry) {
+        const tech = entry.techOptions.find(t => t.techId === techId || t.payload === msg);
+        if (tech) { matchedEntry = entry; matchedTech = tech; }
+      }
+    }
+
+    // Case B: numeric reply with exactly 1 pending — assume it's that one
+    if (!matchedEntry && /^\d+$/.test(msg.trim()) && pendingList.length === 1) {
+      const entry = pendingList[0];
+      const idx = parseInt(msg.trim(), 10) - 1;
+      if (idx >= 0 && idx < entry.techOptions.length) {
+        matchedEntry = entry; matchedTech = entry.techOptions[idx];
+      }
+    }
+
+    // Case C: numeric reply with 2+ pending — ambiguous
+    if (!matchedEntry && /^\d+$/.test(msg.trim()) && pendingList.length >= 2) {
+      let listMsg = `יש ${pendingList.length} תקלות ממתינות. לחץ על הכפתור בהודעה הספציפית — לא אפשר לבחור על ידי מספר ישיר כשיש כמה.\n\nממתינות:`;
+      pendingList.forEach((e, i) => {
+        listMsg += `\n${i+1}. ${e.machine.site_name} (${e.ticket.ticket_number})`;
+      });
+      return listMsg;
+    }
+
+    if (matchedEntry && matchedTech) {
+      const reply = await finishAssign(s, matchedEntry, matchedTech.techName, phone);
+      // Remove this ticket from EVERYONE's pending (so the second dispatcher doesn't double-assign)
+      const allDispatchers = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
+      for (const d of allDispatchers) {
+        if (sessions[d]?.pendingTickets) {
+          delete sessions[d].pendingTickets[matchedEntry.ticket.ticket_number];
+        }
+      }
+      return reply;
+    }
+    // If we get here, the message wasn't an assign — fall through to other handlers
+  }
+
   // ===== IDLE =====
   if (s.step === 'idle') {
 
@@ -290,6 +521,7 @@ async function handleMessage(from, body) {
       const rest = msg.replace('סיימתי','').trim();
       const words = rest.split(/\s+/);
       const clientWord = words[0] || '';
+      const ticketNumMatch = rest.match(/KL-\d{4,}/i);
 
       const {data: openTickets} = await supabase.from('tickets')
         .select('*,customers(site_name,site_code,machine_type,location,city)')
@@ -302,8 +534,21 @@ async function handleMessage(from, body) {
         if (tech) myTickets = myTickets.filter(t => t.technician_id === tech.id);
       }
 
-      const matched = myTickets.filter(t => t.customers?.site_name?.includes(clientWord));
-      if (!matched.length) return `לא מצאתי תקלה פתוחה עבור "${clientWord}"`;
+      let matched;
+      if (ticketNumMatch) {
+        // explicit ticket number provided
+        const tnum = ticketNumMatch[0].toUpperCase();
+        matched = myTickets.filter(t => t.ticket_number === tnum);
+        if (!matched.length) return `לא מצאתי תקלה פתוחה עם מספר ${tnum}`;
+      } else if (rest.length === 0) {
+        // NEW: bare "סיימתי" — use all of the user's open tickets
+        if (myTickets.length === 0) return 'אין לך תקלות פתוחות.';
+        matched = myTickets;
+      } else {
+        // customer name fragment provided
+        matched = myTickets.filter(t => t.customers?.site_name?.includes(clientWord));
+        if (!matched.length) return `לא מצאתי תקלה פתוחה עבור "${clientWord}"`;
+      }
 
       if (matched.length === 1) {
         s.ticketId = matched[0].id;
@@ -314,7 +559,7 @@ async function handleMessage(from, body) {
         s.actions = [];
         s.parts = [];
         s.step = 'closing_action';
-        return ACTION_MENU;
+        return await offerActionMenu(phone, false);
       }
 
       s.step = 'select_close_ticket';
@@ -357,13 +602,31 @@ async function handleMessage(from, body) {
         s.step = 'confirm_customer';
         s.customers = customers;
         const c = customers[0];
-        return `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}\n\nזה הלקוח? 1️⃣ כן | 2️⃣ לא`;
+        const fallback = `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}\n\nזה הלקוח? 1️⃣ כן | 2️⃣ לא`;
+        if (process.env.CONTENT_SID_CONFIRM_YESNO) {
+          const headerText = `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}`;
+          await sendInteractive(phone, fallback, 'confirm_yesno', { 1: headerText });
+          return null;
+        }
+        return fallback;
       }
 
       s.step = 'select_customer';
       s.customers = customers;
-      return `מצאתי כמה תוצאות:\n` +
+      const fallbackText = `מצאתי כמה תוצאות:\n` +
         customers.map((c,i) => `${i+1}️⃣ ${c.site_name} — ${c.city}${c.location?' | '+c.location:''}`).join('\n');
+
+      // v15: try interactive list, fall back to text
+      if (process.env.CONTENT_SID_PICK_FROM_LIST) {
+        const options = customers.slice(0,10).map((c,i) => ({
+          label: `${c.site_name} — ${c.city||''}`.slice(0,24),  // List Picker title max 24 chars
+          payload: `cust:${i+1}`,
+        }));
+        await sendInteractive(phone, fallbackText, 'pick_list',
+          buildPickListVars('בחר לקוח:', options));
+        return null;  // bypass TwiML; we already sent
+      }
+      return fallbackText;
     }
 
     // מעבדה — אלכס
@@ -377,10 +640,13 @@ async function handleMessage(from, body) {
 
   // ===== אישור לקוח =====
   if (s.step === 'confirm_customer') {
-    if (msg === '1') {
+    // Accept "1"/"כן"/"yes" as positive, "2"/"לא"/"no" as negative
+    const isYes = msg === '1' || msg === 'yes' || msg === 'כן';
+    const isNo  = msg === '2' || msg === 'no'  || msg === 'לא';
+    if (isYes) {
       return await handleOneCustomer(s, s.customers[0], phone);
     }
-    if (msg === '2') {
+    if (isNo) {
       s.step = 'idle';
       return 'בסדר, נסה שוב עם שם אחר';
     }
@@ -389,12 +655,24 @@ async function handleMessage(from, body) {
 
   // ===== בחירת לקוח =====
   if (s.step === 'select_customer') {
-    const idx = parseInt(msg) - 1;
+    // Accept either "1", "2"... typed OR "cust:N" payload from button click
+    let idx = -1;
+    if (msg.startsWith('cust:')) {
+      idx = parseInt(msg.slice(5), 10) - 1;
+    } else {
+      idx = parseInt(msg) - 1;
+    }
     if (idx >= 0 && idx < (s.customers||[]).length) {
       const c = s.customers[idx];
       s.step = 'confirm_customer';
       s.customers = [c];
-      return `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}\n\nזה הלקוח? 1️⃣ כן | 2️⃣ לא`;
+      const fallback = `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}\n\nזה הלקוח? 1️⃣ כן | 2️⃣ לא`;
+      if (process.env.CONTENT_SID_CONFIRM_YESNO) {
+        const headerText = `📍 ${c.site_name}\n🏙️ ${c.city || ''}${c.machine_type?' | 🔧 '+c.machine_type:''}${c.address?' | 📬 '+c.address:''}\n👤 ${c.contact_name||''}${c.contact_phone?' — '+c.contact_phone:''}`;
+        await sendInteractive(phone, fallback, 'confirm_yesno', { 1: headerText });
+        return null;
+      }
+      return fallback;
     }
     return 'בחר מספר מהרשימה';
   }
@@ -452,11 +730,47 @@ async function handleMessage(from, body) {
 
   // ===== שיוך טכנאי =====
   if (s.step === 'assign_tech_pick') {
+    // Legacy path — fallback if pendingTickets is empty but step is set
     const idx = parseInt(msg) - 1;
     if (idx >= 0 && idx < (s.techs||[]).length) {
-      return await finishAssign(s, s.techs[idx].name, phone);
+      return 'התקלה כבר טופלה או פגה';
     }
     return 'בחר מספר מהרשימה';
+  }
+
+  // ===== NEW: pick_location step =====
+  if (s.step === 'pick_location') {
+    const choice = resolveSelection(msg, s.pendingLocations || []);
+    if (!choice) return 'בחר מספר מהרשימה';
+    const machine = { ...s.pendingMachine, location: choice.location };
+    s.pendingLocations = null;
+    s.pendingMachine = null;
+    return await buildShiuach(s, machine, phone);
+  }
+
+  // ===== NEW: soft_location_or_skip step (for indistinguishable customer_id duplicates) =====
+  if (s.step === 'soft_location_or_skip') {
+    const customer = s.faultCustomer;
+    if (!customer) { s.step = 'idle'; return null; }
+    const text = msg.trim();
+    const skipWords = ['לא יודע','לא ידוע','דלג','skip','no','לא'];
+    const isSkip = skipWords.some(w => text.toLowerCase() === w);
+    if (isSkip || text.length < 1) {
+      // Proceed with the customer as-is; no location info
+      return await offerLocationOrShiuach(s, customer, phone);
+    }
+    // User provided some location text — attach it to the machine
+    const machine = { ...customer, location: text };
+    return await offerLocationOrShiuach(s, machine, phone);
+  }
+
+  // ===== NEW: await_fault_desc step =====
+  if (s.step === 'await_fault_desc') {
+    if (msg.length < 2) return 'אנא תאר את התקלה במשפט קצר';
+    s.faultDesc = msg;
+    const machine = s.pendingMachine;
+    s.pendingMachine = null;
+    return await offerLocationOrShiuach(s, machine, phone);
   }
 
   // ===== בחירת תקלה לסגירה =====
@@ -472,31 +786,33 @@ async function handleMessage(from, body) {
       s.actions = [];
       s.parts = [];
       s.step = 'closing_action';
-      return ACTION_MENU;
+      return await offerActionMenu(phone, false);
     }
     return 'בחר מספר מהרשימה';
   }
 
   // ===== פעולת סגירה =====
   if (s.step === 'closing_action') {
-    if (ACTIONS[msg]) {
-      if (msg === '5') { s.step = 'closing_part'; return PART_MENU; }
-      if (msg === '6') {
+    // Accept "1"-"6" or "act:1"-"act:6" payload
+    const num = msg.startsWith('act:') ? msg.slice(4) : msg;
+    if (ACTIONS[num]) {
+      if (num === '5') { s.step = 'closing_part'; return PART_MENU; }
+      if (num === '6') {
         s.step = 'closing_action_other';
         return 'מה עשית? (ציין ידנית)';
       }
-      s.actions = [ACTIONS[msg]];
+      s.actions = [ACTIONS[num]];
       s.step = 'closing_more';
-      return MORE_MENU;
+      return await offerActionMenu(phone, true);
     }
-    return ACTION_MENU;
+    return await offerActionMenu(phone, false);
   }
 
   // ===== פעולה ידנית =====
   if (s.step === 'closing_action_other') {
     s.actions = [msg];
     s.step = 'closing_more';
-    return MORE_MENU;
+    return await offerActionMenu(phone, true);
   }
 
   // ===== בחירת חלק =====
@@ -510,7 +826,7 @@ async function handleMessage(from, body) {
       s.actions.push('החלפת חלק');
       s.parts.push(partName);
       s.step = 'closing_more';
-      return MORE_MENU;
+      return await offerActionMenu(phone, true);
     }
     return PART_MENU;
   }
@@ -520,16 +836,17 @@ async function handleMessage(from, body) {
     s.actions.push('החלפת חלק');
     s.parts.push(msg);
     s.step = 'closing_more';
-    return MORE_MENU;
+    return await offerActionMenu(phone, true);
   }
 
   // ===== עוד פעולה? =====
   if (s.step === 'closing_more') {
-    if (msg === '7') return await doCloseTicket(s);
-    if (msg === '5') { s.step = 'closing_part'; return PART_MENU; }
-    if (msg === '6') { s.step = 'closing_action_other'; return 'מה עשית? (ציין ידנית)'; }
-    if (ACTIONS[msg] && !s.actions.includes(ACTIONS[msg])) s.actions.push(ACTIONS[msg]);
-    return MORE_MENU;
+    const num = msg.startsWith('act:') ? msg.slice(4) : msg;
+    if (num === '7') return await doCloseTicket(s);
+    if (num === '5') { s.step = 'closing_part'; return PART_MENU; }
+    if (num === '6') { s.step = 'closing_action_other'; return 'מה עשית? (ציין ידנית)'; }
+    if (ACTIONS[num] && !s.actions.includes(ACTIONS[num])) s.actions.push(ACTIONS[num]);
+    return await offerActionMenu(phone, true);
   }
 
   // ===== מעבדה — בחירת מכונה =====
@@ -554,7 +871,7 @@ async function handleMessage(from, body) {
       s.step = 'lab_action';
       s.actions = [];
       s.parts = [];
-      return ACTION_MENU;
+      return await offerActionMenu(phone, false);
     }
     return `אתה עובד על ${s.labMachine}\nכשתסיים — כתוב: סיימתי`;
   }
@@ -566,15 +883,15 @@ async function handleMessage(from, body) {
       if (msg === '6') { s.step = 'lab_action_other'; return 'מה עשית? (ציין ידנית)'; }
       s.actions = [ACTIONS[msg]];
       s.step = 'lab_more';
-      return MORE_MENU;
+      return await offerActionMenu(phone, true);
     }
-    return ACTION_MENU;
+    return await offerActionMenu(phone, false);
   }
 
   if (s.step === 'lab_action_other') {
     s.actions = [msg];
     s.step = 'lab_more';
-    return MORE_MENU;
+    return await offerActionMenu(phone, true);
   }
 
   // ===== מעבדה — חלק =====
@@ -584,7 +901,7 @@ async function handleMessage(from, body) {
       s.actions.push('החלפת חלק');
       s.parts.push(PARTS[msg]);
       s.step = 'lab_more';
-      return MORE_MENU;
+      return await offerActionMenu(phone, true);
     }
     return PART_MENU;
   }
@@ -593,7 +910,7 @@ async function handleMessage(from, body) {
     s.actions.push('החלפת חלק');
     s.parts.push(msg);
     s.step = 'lab_more';
-    return MORE_MENU;
+    return await offerActionMenu(phone, true);
   }
 
   // ===== מעבדה — עוד פעולה =====
@@ -614,7 +931,7 @@ async function handleMessage(from, body) {
     if (msg === '5') { s.step = 'lab_part'; return PART_MENU; }
     if (msg === '6') { s.step = 'lab_action_other'; return 'מה עשית? (ציין ידנית)'; }
     if (ACTIONS[msg] && !s.actions.includes(ACTIONS[msg])) s.actions.push(ACTIONS[msg]);
-    return MORE_MENU;
+    return await offerActionMenu(phone, true);
   }
 
   // ===== שיוך טכנאי לאיסוף =====
@@ -880,17 +1197,78 @@ async function handleWhatOpen(s, user) {
 
 // ===== HELPERS =====
 async function handleOneCustomer(s, customer, phone) {
-  const machines = await getCustomerMachines(customer.site_name, s.cityName || '');
-  if (machines.length > 1) {
-    s.step = 'select_machine';
-    s.machines = machines;
-    s.faultCustomer = customer;
-    const list = machines.map((m,i) =>
-      `${i+1}️⃣ ${m.city || ''} | ${m.location || 'לא מצוין'} | ${m.machine_type}`
-    ).join('\n');
-    return `יש ${machines.length} מכונות ב${customer.site_name} — איזו?\n${list}`;
+  // CORRECTION (post-v14 review): the user has already picked a specific site_code
+  // by this point. Do NOT re-expand by customer_id (that was the legacy bug).
+  // Just check site_locations for THIS site_code.
+  return await offerLocationOrShiuach(s, customer, phone);
+}
+
+// Returns true when the parsed fault description is so weak it should be re-asked
+function isFaultDescTooWeak(faultDesc, machine) {
+  if (!faultDesc) return true;
+  const trimmed = faultDesc.trim();
+  if (trimmed.length < 3) return true;
+  if (trimmed === machine.site_name) return true;
+  // Strip the customer name and the word תקלה — anything left of substance?
+  let stripped = trimmed
+    .replace(machine.site_name || '', '')
+    .replace(/תקלה|fault|broken/gi, '')
+    .replace(/[^א-תA-Za-z0-9]+/g, ' ')
+    .trim();
+  // Also strip individual words from the customer name
+  if (machine.site_name) {
+    machine.site_name.split(/\s+/).forEach(w => {
+      if (w.length > 1) stripped = stripped.replace(new RegExp(w, 'g'), '');
+    });
   }
-  return await buildShiuach(s, customer, phone);
+  stripped = stripped.replace(/\s+/g, ' ').trim();
+  return stripped.length < 3;
+}
+
+async function offerLocationOrShiuach(s, machine, phone) {
+  // Validate that we actually have a fault description; if blank, ask for it
+  if (isFaultDescTooWeak(s.faultDesc, machine)) {
+    s.step = 'await_fault_desc';
+    s.pendingMachine = machine;
+    return 'מה התקלה? (תיאור קצר)';
+  }
+
+  const locations = await getSiteLocations(machine.site_code);
+
+  if (locations.length === 0) {
+    // No locations defined — open ticket immediately
+    machine.location = machine.location || null;
+    return await buildShiuach(s, machine, phone);
+  }
+
+  if (locations.length === 1) {
+    // Single location — use it without asking
+    machine.location = locations[0].location;
+    return await buildShiuach(s, machine, phone);
+  }
+
+  // 2+ locations — ask the user
+  s.step = 'pick_location';
+  s.pendingMachine = machine;
+  s.pendingLocations = locations.map(l => ({
+    label: l.location,
+    payload: `loc:${machine.site_code}:${l.location}`,
+    location: l.location,
+  }));
+
+  const fallbackText = interactivePrompt({
+    header: `באיזו מכונה ב${machine.site_name}?`,
+    options: s.pendingLocations,
+    kind: 'pick_location',
+    contextId: machine.site_code,
+  });
+
+  if (process.env.CONTENT_SID_PICK_FROM_LIST) {
+    await sendInteractive(phone, fallbackText, 'pick_list',
+      buildPickListVars(`באיזו מכונה ב${machine.site_name}?`, s.pendingLocations));
+    return null;
+  }
+  return fallbackText;
 }
 
 async function buildShiuach(s, machine, phone) {
@@ -903,10 +1281,10 @@ async function buildShiuach(s, machine, phone) {
   const ticket = await openTicket(machine.site_code, machine.location, s.faultDesc, s.userName || phone);
   s.ticket = ticket;
   s.techs = techs;
-  s.step = 'assign_tech_pick';
+  s.step = 'idle'; // sender's job is done; assignment lives on Ori/Oded sessions
 
-  // הודעה לאורי
-  let oriMsg = `📋 תקלה חדשה\n📍 ${machine.site_name}`;
+  // Build the prompt that goes to Ori/Oded
+  let oriMsg = `📋 תקלה חדשה (${ticket.ticket_number})\n📍 ${machine.site_name}`;
   if (machine.address) oriMsg += `\n📬 ${machine.address}`;
   if (machine.city) oriMsg += `, ${machine.city}`;
   if (machine.location) oriMsg += `\n🏢 ${machine.location}`;
@@ -914,6 +1292,7 @@ async function buildShiuach(s, machine, phone) {
   oriMsg += `\n⚠️ ${s.faultDesc}`;
   if (machine.contact_name) oriMsg += `\n👤 ${machine.contact_name}`;
   if (machine.contact_phone) oriMsg += ` — ${machine.contact_phone}`;
+  oriMsg += `\n🕐 נפתחה: ${fmtDate(ticket.opened_at || new Date().toISOString())}`;
   if (hist && hist.length > 0) {
     oriMsg += `\n\n📜 תקלות אחרונות:`;
     hist.slice(0,2).forEach(h => {
@@ -922,23 +1301,45 @@ async function buildShiuach(s, machine, phone) {
   }
   if (recent >= 3) oriMsg += `\n⚠️ ${recent} תקלות ב-60 יום האחרונים`;
   oriMsg += `\n\n🔧 טיפל בעבר: ${prevTech || 'לא ידוע'}`;
-  oriMsg += `\n\nבחר טכנאי:\n` + techs.map((t,i) => `${i+1}️⃣ ${t.name}`).join('\n');
 
-  // שמור session אצל אורי/עודד כדי שיוכלו לבחור טכנאי
+  const techOptions = techs.map(t => ({
+    label: t.name,
+    payload: `assign:${ticket.ticket_number}:${t.id}`,
+    techId: t.id,
+    techName: t.name,
+  }));
+
+  oriMsg += `\n\n` + interactivePrompt({
+    header: 'בחר טכנאי:',
+    options: techOptions,
+    kind: 'assign_tech',
+    contextId: ticket.ticket_number,
+  });
+
+  // NEW MULTI-PENDING MODEL:
+  // Store the ticket as a pending entry keyed by ticket_number.
+  // Multiple tickets can coexist; user replies are routed by payload, not by step.
   const oriPhones = [process.env.PHONE_ORI, process.env.PHONE_ODED].filter(Boolean);
   for (const p of oriPhones) {
     if (!sessions[p]) sessions[p] = {step:'idle'};
-    sessions[p].step = 'assign_tech_pick';
-    sessions[p].techs = techs;
-    sessions[p].ticket = ticket;
-    sessions[p].selectedMachine = machine;
-    sessions[p].faultDesc = s.faultDesc;
-    sessions[p]._phone = p;
-    await sendWhatsApp(p, oriMsg);
+    if (!sessions[p].pendingTickets) sessions[p].pendingTickets = {};
+    sessions[p].pendingTickets[ticket.ticket_number] = {
+      ticket, machine, faultDesc: s.faultDesc,
+      techOptions, openedAt: new Date().toISOString(),
+    };
+    // step stays whatever it was; replies route via pendingTickets
+    if (process.env.CONTENT_SID_PICK_FROM_LIST) {
+      // The header carries all the fault context; the list options are tech names with payload
+      // assign:KL-XXXXXX:t1 (so a button tap routes correctly to that ticket).
+      await sendInteractive(p, oriMsg, 'pick_list',
+        buildPickListVars(oriMsg, techOptions));
+    } else {
+      await sendWhatsApp(p, oriMsg);
+    }
   }
 
-  // אישור מלא לשולח
-  let confirmMsg = `✅ תקלה נרשמה\n\n📍 ${machine.site_name}`;
+  // confirmation back to the sender
+  let confirmMsg = `✅ תקלה נרשמה (${ticket.ticket_number})\n\n📍 ${machine.site_name}`;
   if (machine.city) confirmMsg += `\n🏙️ ${machine.city}`;
   if (machine.address) confirmMsg += ` | 📬 ${machine.address}`;
   if (machine.location) confirmMsg += `\n🏢 ${machine.location}`;
@@ -946,6 +1347,7 @@ async function buildShiuach(s, machine, phone) {
   confirmMsg += `\n⚠️ ${s.faultDesc}`;
   if (machine.contact_name) confirmMsg += `\n👤 ${machine.contact_name}`;
   if (machine.contact_phone) confirmMsg += ` — ${machine.contact_phone}`;
+  confirmMsg += `\n🕐 נפתחה: ${fmtDate(ticket.opened_at || new Date().toISOString())}`;
   if (hist && hist.length > 0) {
     confirmMsg += `\n\n📜 תקלות אחרונות:`;
     hist.slice(0,2).forEach(h => {
@@ -956,22 +1358,25 @@ async function buildShiuach(s, machine, phone) {
   return confirmMsg;
 }
 
-async function finishAssign(s, techName, phone) {
-  const machine = s.selectedMachine;
-  if (s.ticket) await assignTechnician(s.ticket.id, techName);
+async function finishAssign(s, pendingEntry, techName, phone) {
+  const machine = pendingEntry.machine;
+  const ticket = pendingEntry.ticket;
+  const faultDesc = pendingEntry.faultDesc;
+  if (ticket) await assignTechnician(ticket.id, techName);
 
   const hist = await getHistory(machine.site_code);
   const recent = await countRecent(machine.site_code);
 
   // הודעה לטכנאי
-  let techMsg = `📋 קריאה חדשה!\n📍 ${machine.site_name}`;
+  let techMsg = `📋 קריאה חדשה! (${ticket.ticket_number})\n📍 ${machine.site_name}`;
   if (machine.address) techMsg += `\n📬 ${machine.address}`;
   if (machine.city) techMsg += `, ${machine.city}`;
   if (machine.location) techMsg += `\n🏢 ${machine.location}`;
   techMsg += `\n🔧 ${machine.machine_type}`;
-  techMsg += `\n⚠️ ${s.faultDesc}`;
+  techMsg += `\n⚠️ ${faultDesc}`;
   if (machine.contact_name) techMsg += `\n👤 ${machine.contact_name}`;
   if (machine.contact_phone) techMsg += ` — ${machine.contact_phone}`;
+  techMsg += `\n🕐 נפתחה: ${fmtDate(ticket.opened_at || new Date().toISOString())}`;
   if (hist && hist.length > 0) {
     techMsg += `\n\n📜 תקלות אחרונות:`;
     hist.slice(0,2).forEach(h => {
@@ -979,24 +1384,39 @@ async function finishAssign(s, techName, phone) {
     });
   }
   if (recent >= 3) techMsg += `\n⚠️ ${recent} תקלות ב-60 יום`;
-  techMsg += `\n\nכשתסיים — כתוב: סיימתי ${machine.site_name.split(' ')[0]}`;
+  techMsg += `\n\nכשתסיים — כתוב: סיימתי ${ticket.ticket_number}`;
 
   // לקבוצה — broadcast לכולם
-  const groupMsg = `🔧 תקלה חדשה\n📍 ${machine.site_name}${machine.location?' | '+machine.location:''}\n🔧 ${machine.machine_type}\n⚠️ ${s.faultDesc}\n👨‍🔧 שויך ל${techName}`;
+  const groupMsg = `🔧 תקלה חדשה (${ticket.ticket_number})\n📍 ${machine.site_name}${machine.location?' | '+machine.location:''}\n🔧 ${machine.machine_type}\n⚠️ ${faultDesc}\n👨‍🔧 שויך ל${techName}`;
 
   const techPhone = techPhones[techName];
-  if (techPhone) await sendWhatsApp(techPhone, techMsg);
+  if (techPhone) {
+    // v15: send via tech_call template (renders 2 buttons: קיבלתי / סיימתי)
+    if (process.env.CONTENT_SID_TECH_CALL) {
+      await sendInteractive(techPhone, techMsg, 'tech_call', {
+        1: ticket.ticket_number,
+        2: machine.site_name || '',
+        3: machine.address || '',
+        4: machine.city || '',
+        5: machine.location || '',
+        6: machine.machine_type || '',
+        7: faultDesc || '',
+        8: machine.contact_name || '',
+        9: machine.contact_phone || '',
+        10: ticket.opened_at ? fmtDate(ticket.opened_at) : '',
+      });
+    } else {
+      await sendWhatsApp(techPhone, techMsg);
+    }
+  }
   await broadcastAll(groupMsg);
 
-  const phone2 = s._phone;
-  sessions[phone2] = { step: 'idle' };
-
-  return `✅ שויך ל${techName}`;
+  return `✅ ${ticket.ticket_number} שויך ל${techName}`;
 }
 
 async function doCloseTicket(s) {
   const ticket = await closeTicket(s.ticketId, s.actions, s.parts||[]);
-  const siteCode = ticket?.customers?.site_code || s.siteCode;
+  const siteCode = ticket?.customers?.site_code || ticket?.site_code || s.siteCode;
   const hist2 = await getHistory(siteCode, 2);
   const recent = await countRecent(siteCode);
 
@@ -1010,11 +1430,31 @@ async function doCloseTicket(s) {
     }
   }
 
-  const c = ticket?.customers;
-  const actText = s.actions.join(' + ');
-  const partsText = s.parts?.length ? ` | חלקים: ${s.parts.join(', ')}` : '';
-  const openTime = fmtTime(s.openedAt);
-  const closeTime = fmtTime(new Date().toISOString());
+  // Resolve customer info — fallback to a direct lookup if the join didn't return it
+  let c = ticket?.customers;
+  if (!c?.site_name && siteCode) {
+    const {data: cust} = await supabase.from('customers').select('*').eq('site_code', siteCode).single();
+    c = cust || {};
+  }
+
+  // Resolve technician name from ticket.technician_id (don't depend on session state)
+  let techName = '';
+  if (ticket?.technician_id) {
+    const {data: t} = await supabase.from('technicians').select('name').eq('id', ticket.technician_id).single();
+    techName = t?.name || '';
+  }
+
+  // Use opened_at from the ticket record (more reliable than session)
+  const openedAt = ticket?.opened_at || s.openedAt;
+
+  const ticketNum    = ticket?.ticket_number || '';
+  const siteName     = c?.site_name || s.closingSiteName || '';
+  const machineLabel = ticket?.machine_location || s.closingMachine || c?.location || c?.machine_type || '';
+  const faultDesc    = ticket?.description || s.faultDesc || '';
+  const actText      = s.actions.join(' + ');
+  const partsText    = s.parts?.length ? ` | חלקים: ${s.parts.join(', ')}` : '';
+  const openedFmt    = openedAt ? fmtDate(openedAt) : '?';
+  const closedFmt    = fmtDate(new Date().toISOString());
 
   const hist2Text = hist2.map(h =>
     `🔧 ${(h.closed_at||'?').slice(0,10)} — ${h.actions ? h.actions.join(' + ') : 'לא מצוין'}`
@@ -1027,7 +1467,16 @@ async function doCloseTicket(s) {
     alerts += '\n💧 אבנית חוזרת — שקול בדיקת מים או פילטר';
   }
 
-  const groupMsg = `✅ ${c?.site_name||''} — ${s.closingMachine||c?.location||c?.machine_type||''}\n🔧 ${actText}${partsText}\n⏰ ${openTime} — ${closeTime}\n\n📜 2 תקלות אחרונות:\n${hist2Text||'אין היסטוריה'}${alerts}${inventoryAlerts}`;
+  // NEW: include ticket number, fault description, technician name, full open/close timestamps
+  let groupMsg = `✅ ${ticketNum ? ticketNum + ' — ' : ''}${siteName}`;
+  if (machineLabel) groupMsg += ` | ${machineLabel}`;
+  if (faultDesc)    groupMsg += `\n⚠️ ${faultDesc}`;
+  groupMsg += `\n🔧 ${actText}${partsText}`;
+  if (techName)     groupMsg += `\n👨‍🔧 סגור ע"י ${techName}`;
+  groupMsg += `\n🕐 נפתחה: ${openedFmt}`;
+  groupMsg += `\n🕐 נסגרה: ${closedFmt}`;
+  if (hist2Text)    groupMsg += `\n\n📜 2 תקלות אחרונות:\n${hist2Text}`;
+  groupMsg += `${alerts}${inventoryAlerts}`;
 
   s.step = 'idle';
   await broadcastAll(groupMsg);
@@ -1118,9 +1567,19 @@ setInterval(() => {
 app.post('/webhook', async (req, res) => {
   try {
     const from = req.body.From;
-    const body = req.body.Body || '';
+    let body = req.body.Body || '';
     const mediaUrl = req.body.MediaUrl0;
     const mediaType = req.body.MediaContentType0;
+
+    // v15: button clicks come in via ButtonPayload / ListId fields, not Body.
+    // Map them onto `body` so the existing handlers see them as if typed.
+    // ButtonPayload takes priority over Body when both are present.
+    const buttonPayload = req.body.ButtonPayload || req.body.ListId;
+    if (buttonPayload) {
+      console.log(`🔘 button/list payload: ${buttonPayload}`);
+      body = buttonPayload;
+    }
+
     console.log(`📨 ${from}: ${body}${mediaUrl?' [תמונה]':''}`);
 
     if (mediaUrl && mediaType && mediaType.startsWith('image/')) {
